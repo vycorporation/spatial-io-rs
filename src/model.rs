@@ -175,6 +175,35 @@ pub enum AttributeValue {
     String(String),
 }
 
+/// Declared logical type for one scalar attribute column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AttributeType {
+    /// Boolean.
+    Bool,
+    /// Signed 64-bit integer.
+    I64,
+    /// Unsigned 64-bit integer.
+    U64,
+    /// 64-bit floating point.
+    F64,
+    /// Binary bytes.
+    Bytes,
+    /// UTF-8 text.
+    String,
+}
+
+/// Ordered schema declaration for one feature attribute.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AttributeFieldV1 {
+    /// Stable non-empty column name.
+    pub name: String,
+    /// Declared scalar type, including when every value is null.
+    pub value_type: AttributeType,
+    /// Whether null or missing values are permitted.
+    pub nullable: bool,
+}
+
 /// One stable feature and its source provenance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeatureV1 {
@@ -199,6 +228,8 @@ pub struct FeatureV1 {
 pub struct FeatureCollectionV1 {
     /// Spatial reference shared by every feature.
     pub spatial_reference: crate::SpatialReference,
+    /// Explicit attribute columns in deterministic output order.
+    pub attribute_schema: Vec<AttributeFieldV1>,
     /// Features in stable output order.
     pub features: Vec<FeatureV1>,
 }

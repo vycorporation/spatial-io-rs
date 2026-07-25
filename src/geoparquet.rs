@@ -18,8 +18,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::{
-    AttributeValue, CoordinateSpace, Crs, FeatureCollectionV1, GeometryV1, LineString,
-    SpatialIoError,
+    AttributeType, AttributeValue, CoordinateSpace, Crs, FeatureCollectionV1, GeometryV1,
+    LineString, SpatialIoError,
 };
 
 const RESERVED_COLUMNS: [&str; 7] = [
@@ -163,6 +163,17 @@ pub fn write_geoparquet(
 }
 
 fn validate_feature_metadata(collection: &FeatureCollectionV1) -> Result<(), SpatialIoError> {
+    let mut declared = BTreeSet::new();
+    for field in &collection.attribute_schema {
+        if field.name.is_empty()
+            || RESERVED_COLUMNS.contains(&field.name.as_str())
+            || !declared.insert(field.name.as_str())
+        {
+            return Err(SpatialIoError::IncompatibleAttribute {
+                name: field.name.clone(),
+            });
+        }
+    }
     for feature in &collection.features {
         if let Some(tolerance) = feature.conversion_tolerance
             && (!tolerance.is_finite() || tolerance <= 0.0)
@@ -170,7 +181,7 @@ fn validate_feature_metadata(collection: &FeatureCollectionV1) -> Result<(), Spa
             return Err(SpatialIoError::InvalidTolerance(tolerance));
         }
         for (name, value) in &feature.attributes {
-            if RESERVED_COLUMNS.contains(&name.as_str()) {
+            if !declared.contains(name.as_str()) {
                 return Err(SpatialIoError::IncompatibleAttribute { name: name.clone() });
             }
             if matches!(value, AttributeValue::F64(value) if !value.is_finite()) {
@@ -181,6 +192,22 @@ fn validate_feature_metadata(collection: &FeatureCollectionV1) -> Result<(), Spa
                         _ => unreachable!(),
                     },
                 });
+            }
+        }
+        for field in &collection.attribute_schema {
+            match feature.attributes.get(&field.name) {
+                None | Some(AttributeValue::Null) if field.nullable => {}
+                None | Some(AttributeValue::Null) => {
+                    return Err(SpatialIoError::IncompatibleAttribute {
+                        name: field.name.clone(),
+                    });
+                }
+                Some(value) if attribute_type(value) == Some(field.value_type) => {}
+                Some(_) => {
+                    return Err(SpatialIoError::IncompatibleAttribute {
+                        name: field.name.clone(),
+                    });
+                }
             }
         }
     }
@@ -315,7 +342,7 @@ fn build_batch(
                 .collect::<Vec<_>>(),
         )),
     );
-    append_attributes(collection, &mut fields, &mut arrays)?;
+    append_attributes(collection, &mut fields, &mut arrays);
     let wkbs = lines
         .iter()
         .map(|line| encode_wkb(line))
@@ -356,55 +383,36 @@ fn append_attributes(
     collection: &FeatureCollectionV1,
     fields: &mut Vec<Field>,
     arrays: &mut Vec<ArrayRef>,
-) -> Result<(), SpatialIoError> {
-    let names = collection
-        .features
-        .iter()
-        .flat_map(|feature| feature.attributes.keys().cloned())
-        .collect::<BTreeSet<_>>();
-    for name in names {
-        let scalar_type = collection
-            .features
-            .iter()
-            .filter_map(|feature| feature.attributes.get(&name))
-            .filter_map(attribute_type)
-            .try_fold(None, |current, next| match current {
-                None => Ok(Some(next)),
-                Some(current) if current == next => Ok(Some(current)),
-                Some(_) => Err(SpatialIoError::IncompatibleAttribute { name: name.clone() }),
-            })?
-            .ok_or_else(|| SpatialIoError::IncompatibleAttribute { name: name.clone() })?;
-        append_attribute_column(collection, &name, scalar_type, fields, arrays);
+) {
+    for field in &collection.attribute_schema {
+        append_attribute_column(
+            collection,
+            &field.name,
+            field.value_type,
+            field.nullable,
+            fields,
+            arrays,
+        );
     }
-    Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ScalarType {
-    Bool,
-    I64,
-    U64,
-    F64,
-    Bytes,
-    String,
-}
-
-fn attribute_type(value: &AttributeValue) -> Option<ScalarType> {
+fn attribute_type(value: &AttributeValue) -> Option<AttributeType> {
     match value {
         AttributeValue::Null => None,
-        AttributeValue::Bool(_) => Some(ScalarType::Bool),
-        AttributeValue::I64(_) => Some(ScalarType::I64),
-        AttributeValue::U64(_) => Some(ScalarType::U64),
-        AttributeValue::F64(_) => Some(ScalarType::F64),
-        AttributeValue::Bytes(_) => Some(ScalarType::Bytes),
-        AttributeValue::String(_) => Some(ScalarType::String),
+        AttributeValue::Bool(_) => Some(AttributeType::Bool),
+        AttributeValue::I64(_) => Some(AttributeType::I64),
+        AttributeValue::U64(_) => Some(AttributeType::U64),
+        AttributeValue::F64(_) => Some(AttributeType::F64),
+        AttributeValue::Bytes(_) => Some(AttributeType::Bytes),
+        AttributeValue::String(_) => Some(AttributeType::String),
     }
 }
 
 fn append_attribute_column(
     collection: &FeatureCollectionV1,
     name: &str,
-    scalar_type: ScalarType,
+    scalar_type: AttributeType,
+    nullable: bool,
     fields: &mut Vec<Field>,
     arrays: &mut Vec<ArrayRef>,
 ) {
@@ -414,7 +422,7 @@ fn append_attribute_column(
         .map(|feature| feature.attributes.get(name))
         .collect::<Vec<_>>();
     let (data_type, array): (DataType, ArrayRef) = match scalar_type {
-        ScalarType::Bool => (
+        AttributeType::Bool => (
             DataType::Boolean,
             Arc::new(BooleanArray::from(
                 values
@@ -427,7 +435,7 @@ fn append_attribute_column(
                     .collect::<Vec<_>>(),
             )),
         ),
-        ScalarType::I64 => (
+        AttributeType::I64 => (
             DataType::Int64,
             Arc::new(Int64Array::from(
                 values
@@ -440,7 +448,7 @@ fn append_attribute_column(
                     .collect::<Vec<_>>(),
             )),
         ),
-        ScalarType::U64 => (
+        AttributeType::U64 => (
             DataType::UInt64,
             Arc::new(UInt64Array::from(
                 values
@@ -453,7 +461,7 @@ fn append_attribute_column(
                     .collect::<Vec<_>>(),
             )),
         ),
-        ScalarType::F64 => (
+        AttributeType::F64 => (
             DataType::Float64,
             Arc::new(Float64Array::from(
                 values
@@ -466,7 +474,7 @@ fn append_attribute_column(
                     .collect::<Vec<_>>(),
             )),
         ),
-        ScalarType::Bytes => (
+        AttributeType::Bytes => (
             DataType::Binary,
             Arc::new(BinaryArray::from(
                 values
@@ -479,7 +487,7 @@ fn append_attribute_column(
                     .collect::<Vec<_>>(),
             )),
         ),
-        ScalarType::String => (
+        AttributeType::String => (
             DataType::Utf8,
             Arc::new(StringArray::from(
                 values
@@ -493,7 +501,7 @@ fn append_attribute_column(
             )),
         ),
     };
-    push_column(fields, arrays, Field::new(name, data_type, true), array);
+    push_column(fields, arrays, Field::new(name, data_type, nullable), array);
 }
 
 fn push_column(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, field: Field, array: ArrayRef) {

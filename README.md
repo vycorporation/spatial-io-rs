@@ -11,7 +11,8 @@ The first release provides:
 - exact six-coefficient affine transformation with explicit pixel anchoring;
 - optional local GeoTIFF spatial-reference reading;
 - optional GeoParquet 1.1 WKB `LineString` writing;
-- typed scalar attributes and conversion provenance; and
+- explicitly typed scalar-attribute schemas, including all-null columns, and
+  conversion provenance; and
 - atomic, attested artifact publication.
 
 The Cargo package is `spatial-io`; Rust code imports it as `spatial_io`.
@@ -70,6 +71,8 @@ spatial-io = { git = "https://github.com/vycorporation/spatial-io-rs", features 
 
 See [`examples/cubic_to_geoparquet.rs`](examples/cubic_to_geoparquet.rs) for
 complete local and georeferenced output construction.
+See [`docs/attributes.md`](docs/attributes.md) for the exact declared-schema
+contract used by integrations such as `vectorizer-rs`.
 
 ## Coordinate and format rules
 
