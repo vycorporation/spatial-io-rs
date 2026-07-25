@@ -1,8 +1,8 @@
 # spatial-io Bootstrap Design
 
-**Status:** Proposed for written review  
-**Date:** 2026-07-25  
-**Repository:** `vycorporation/spatial-io-rs`  
+**Status:** Proposed for written review
+**Date:** 2026-07-25
+**Repository:** `vycorporation/spatial-io-rs`
 **Visibility:** Public
 
 ## Purpose
