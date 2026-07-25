@@ -1,0 +1,37 @@
+name: Contract change
+description: Propose a new primitive, CRS behavior, format, or output-affecting change.
+title: "[Contract]: "
+labels: ["contract"]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: Consumer need
+      description: Name the concrete producer and consumer that require this change.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed contract
+      description: Define geometry, coordinate, CRS, provenance, errors, and determinism.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Validation evidence
+      description: List fixtures and independent readers that will prove the behavior.
+    validations:
+      required: true
+  - type: checkboxes
+    id: boundaries
+    attributes:
+      label: Boundary checks
+      options:
+        - label: The proposal does not infer a missing CRS.
+          required: true
+        - label: The proposal keeps dependency-specific types out of the public API.
+          required: true
+        - label: The proposal does not silently promote closed paths to polygons.
+          required: true
