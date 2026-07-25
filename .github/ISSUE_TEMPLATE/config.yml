@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Design and ownership context
+    url: https://github.com/vycorporation/spatial-io-rs/blob/main/CONTEXT.md
+    about: Review repository scope and contracts before filing.

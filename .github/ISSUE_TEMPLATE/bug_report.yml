@@ -1,0 +1,30 @@
+name: Bug report
+description: Report incorrect conversion, metadata, or publication behavior.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the observed and expected behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Include geometry, coordinate space, features, and exact command or API call.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Artifact evidence
+      description: Include metadata, reader output, checksums, or fixture details without sensitive data.
+  - type: input
+    id: version
+    attributes:
+      label: Commit or crate version
+    validations:
+      required: true
