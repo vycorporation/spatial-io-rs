@@ -65,6 +65,7 @@ pub fn flatten_cubic(
         &mut points,
         &mut subdivision_count,
     )?;
+    preserve_collapsed_endpoint(&mut points, cubic.p3);
     Ok(DerivedLineString {
         line: LineString::new(points)?,
         source_primitive_ids: Vec::new(),
@@ -101,6 +102,9 @@ pub fn flatten_cubic_path(
             &mut subdivision_count,
         )?;
     }
+    if let Some(cubic) = path.segments().last() {
+        preserve_collapsed_endpoint(&mut points, cubic.p3);
+    }
     Ok(DerivedLineString {
         line: LineString::new(points)?,
         source_primitive_ids,
@@ -108,6 +112,12 @@ pub fn flatten_cubic_path(
         tolerance: options.tolerance,
         subdivision_count,
     })
+}
+
+fn preserve_collapsed_endpoint(points: &mut Vec<Point2>, endpoint: Point2) {
+    if points.len() == 1 {
+        points.push(endpoint);
+    }
 }
 
 fn flatten_recursive(
