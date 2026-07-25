@@ -2,7 +2,7 @@
 
 **Status:** Proposed for written review  
 **Date:** 2026-07-25  
-**Repository:** `vycorporation/spatial-io`  
+**Repository:** `vycorporation/spatial-io-rs`  
 **Visibility:** Public
 
 ## Purpose
@@ -21,7 +21,7 @@ readers.
 
 ## Repository and Package Identity
 
-- GitHub repository: `vycorporation/spatial-io`
+- GitHub repository: `vycorporation/spatial-io-rs`
 - Cargo package: `spatial-io`
 - Rust crate path: `spatial_io`
 - License: dual MIT or Apache-2.0
@@ -241,7 +241,7 @@ justified once the repository contract is committed.
 
 The skill will:
 
-- route primitive-neutral spatial conversion to `vycorporation/spatial-io`;
+- route primitive-neutral spatial conversion to `vycorporation/spatial-io-rs`;
 - read current format, coordinate, topology, and validation contracts from a
   selected source commit;
 - preserve vectorizer and Rerun ownership;
