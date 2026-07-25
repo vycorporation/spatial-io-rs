@@ -270,11 +270,67 @@ fn resolve_crs(
                 .map_err(|_| SpatialIoError::UnsupportedCrs(format!("EPSG:{code} exceeds i32")))?;
             let source = epsg_utils::epsg_to_projjson(signed)
                 .map_err(|error| SpatialIoError::UnsupportedCrs(format!("EPSG:{code}: {error}")))?;
-            let parsed = serde_json::from_str(source)
+            let mut parsed = serde_json::from_str(source)
                 .map_err(|error| SpatialIoError::InvalidProjJson(error.to_string()))?;
+            complete_projected_base_crs(&mut parsed, *code)?;
             Ok((parsed, format!("EPSG:{code}")))
         }
     }
+}
+
+fn complete_projected_base_crs(
+    crs: &mut serde_json::Value,
+    projected_code: u32,
+) -> Result<(), SpatialIoError> {
+    if crs.get("type").and_then(serde_json::Value::as_str) != Some("ProjectedCRS") {
+        return Ok(());
+    }
+    let base = crs.get("base_crs").ok_or_else(|| {
+        SpatialIoError::InvalidProjJson(format!(
+            "EPSG:{projected_code} projected CRS has no base_crs"
+        ))
+    })?;
+    if base.get("coordinate_system").is_some() {
+        return Ok(());
+    }
+    let id = base.get("id").ok_or_else(|| {
+        SpatialIoError::InvalidProjJson(format!(
+            "EPSG:{projected_code} base_crs has no authority identifier"
+        ))
+    })?;
+    if id.get("authority").and_then(serde_json::Value::as_str) != Some("EPSG") {
+        return Err(SpatialIoError::InvalidProjJson(format!(
+            "EPSG:{projected_code} base_crs is not EPSG-identified"
+        )));
+    }
+    let base_code = id
+        .get("code")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|value| i32::try_from(value).ok())
+        .ok_or_else(|| {
+            SpatialIoError::InvalidProjJson(format!(
+                "EPSG:{projected_code} base_crs has an invalid EPSG code"
+            ))
+        })?;
+    let source = epsg_utils::epsg_to_projjson(base_code).map_err(|error| {
+        SpatialIoError::UnsupportedCrs(format!(
+            "EPSG:{projected_code} base EPSG:{base_code}: {error}"
+        ))
+    })?;
+    let mut complete: serde_json::Value = serde_json::from_str(source)
+        .map_err(|error| SpatialIoError::InvalidProjJson(error.to_string()))?;
+    if complete.get("coordinate_system").is_none() {
+        return Err(SpatialIoError::InvalidProjJson(format!(
+            "EPSG:{projected_code} base EPSG:{base_code} has no coordinate_system"
+        )));
+    }
+    if let Some(object) = complete.as_object_mut() {
+        object.remove("$schema");
+    }
+    crs.as_object_mut()
+        .expect("EPSG converter returned an object")
+        .insert("base_crs".into(), complete);
+    Ok(())
 }
 
 fn build_batch(
