@@ -9,9 +9,9 @@ use geoparquet::metadata::GeoParquetMetadata;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::reader::{FileReader, SerializedFileReader};
 use spatial_io::{
-    AttributeValue, AxisDirection, CoordinateSpace, Crs, FeatureCollectionV1, FeatureV1,
-    GeoParquetWriteOptions, GeometryV1, LineString, PixelAnchor, PixelOrigin, Point2,
-    SpatialReference, write_geoparquet,
+    AttributeFieldV1, AttributeType, AttributeValue, AxisDirection, CoordinateSpace, Crs,
+    FeatureCollectionV1, FeatureV1, GeoParquetWriteOptions, GeometryV1, LineString, PixelAnchor,
+    PixelOrigin, Point2, SpatialReference, write_geoparquet,
 };
 
 #[test]
@@ -130,6 +130,76 @@ fn does_not_clobber_existing_destination_by_default() -> Result<(), Box<dyn std:
     Ok(())
 }
 
+#[test]
+fn writes_declared_all_null_float_column_without_guessing() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("all-null.parquet");
+    let mut collection = collection(
+        pixel_space(),
+        vec![feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7)],
+    );
+    collection.attribute_schema.push(AttributeFieldV1 {
+        name: "maximum_deviation".to_owned(),
+        value_type: AttributeType::F64,
+        nullable: true,
+    });
+    collection.features[0]
+        .attributes
+        .insert("maximum_deviation".to_owned(), AttributeValue::Null);
+
+    write_geoparquet(&path, &collection, GeoParquetWriteOptions::default())?;
+    let batch = read_batch(&path)?;
+    let schema = batch.schema();
+    let field = schema.field_with_name("maximum_deviation")?;
+    assert_eq!(field.data_type(), &arrow_schema::DataType::Float64);
+    assert!(field.is_nullable());
+    assert_eq!(
+        batch
+            .column_by_name("maximum_deviation")
+            .expect("declared column")
+            .null_count(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn rejects_duplicate_reserved_undeclared_and_mismatched_attribute_fields()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let base = collection(
+        pixel_space(),
+        vec![feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7)],
+    );
+
+    let mut duplicate = base.clone();
+    duplicate
+        .attribute_schema
+        .push(duplicate.attribute_schema[0].clone());
+    assert_rejected(&temp.path().join("duplicate.parquet"), &duplicate);
+
+    let mut reserved = base.clone();
+    reserved.attribute_schema[0].name = "geometry".to_owned();
+    reserved.features[0].attributes =
+        BTreeMap::from([("geometry".to_owned(), AttributeValue::U64(7))]);
+    assert_rejected(&temp.path().join("reserved.parquet"), &reserved);
+
+    let mut undeclared = base.clone();
+    undeclared.features[0]
+        .attributes
+        .insert("extra".to_owned(), AttributeValue::Bool(true));
+    assert_rejected(&temp.path().join("undeclared.parquet"), &undeclared);
+
+    let mut mismatched = base;
+    mismatched.features[0].attributes.insert(
+        "class_id".to_owned(),
+        AttributeValue::String("7".to_owned()),
+    );
+    assert_rejected(&temp.path().join("mismatched.parquet"), &mismatched);
+    Ok(())
+}
+
 fn feature(id: &str, line: LineString, class_id: u64) -> FeatureV1 {
     FeatureV1 {
         feature_id: id.to_owned(),
@@ -149,6 +219,11 @@ fn collection(coordinate_space: CoordinateSpace, features: Vec<FeatureV1>) -> Fe
             affine: None,
             raster_interpretation: None,
         },
+        attribute_schema: vec![AttributeFieldV1 {
+            name: "class_id".to_owned(),
+            value_type: AttributeType::U64,
+            nullable: false,
+        }],
         features,
     }
 }
@@ -182,4 +257,12 @@ fn read_geo_metadata(
 fn read_batch(path: &std::path::Path) -> Result<RecordBatch, Box<dyn std::error::Error>> {
     let mut reader = ParquetRecordBatchReaderBuilder::try_new(File::open(path)?)?.build()?;
     Ok(reader.next().expect("one batch")?)
+}
+
+fn assert_rejected(path: &std::path::Path, collection: &FeatureCollectionV1) {
+    assert!(matches!(
+        write_geoparquet(path, collection, GeoParquetWriteOptions::default()),
+        Err(spatial_io::SpatialIoError::IncompatibleAttribute { .. })
+    ));
+    assert!(!path.exists());
 }

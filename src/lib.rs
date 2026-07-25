@@ -19,8 +19,8 @@ mod geotiff;
 pub use error::SpatialIoError;
 pub use flatten::{DerivedLineString, FlattenOptions, flatten_cubic, flatten_cubic_path};
 pub use model::{
-    AttributeValue, CubicBezier, CubicPath, FeatureCollectionV1, FeatureV1, GeometryV1, LineString,
-    Point2,
+    AttributeFieldV1, AttributeType, AttributeValue, CubicBezier, CubicPath, FeatureCollectionV1,
+    FeatureV1, GeometryV1, LineString, Point2,
 };
 pub use reference::{
     Affine2D, AxisDirection, CoordinateSpace, Crs, PixelAnchor, PixelOrigin, RasterInterpretation,

@@ -3,9 +3,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     use std::collections::BTreeMap;
 
     use spatial_io::{
-        AttributeValue, AxisDirection, CoordinateSpace, CubicBezier, CubicPath,
-        FeatureCollectionV1, FeatureV1, FlattenOptions, GeoParquetWriteOptions, GeometryV1,
-        PixelAnchor, PixelOrigin, Point2, SpatialReference, flatten_cubic_path, write_geoparquet,
+        AttributeFieldV1, AttributeType, AttributeValue, AxisDirection, CoordinateSpace,
+        CubicBezier, CubicPath, FeatureCollectionV1, FeatureV1, FlattenOptions,
+        GeoParquetWriteOptions, GeometryV1, PixelAnchor, PixelOrigin, Point2, SpatialReference,
+        flatten_cubic_path, write_geoparquet,
     };
 
     let cubic = CubicBezier::new(
@@ -30,6 +31,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             affine: None,
             raster_interpretation: None,
         },
+        attribute_schema: vec![AttributeFieldV1 {
+            name: "class".to_owned(),
+            value_type: AttributeType::String,
+            nullable: false,
+        }],
         features: vec![FeatureV1 {
             feature_id: "feature-0".to_owned(),
             source_primitive_id: "curve-0".to_owned(),
