@@ -93,6 +93,26 @@ fn resolves_epsg_to_projjson_and_rejects_conflicts_before_publication()
         .expect("explicit crs");
     assert_eq!(crs["id"]["authority"], "EPSG");
     assert_eq!(crs["id"]["code"], 32_618);
+    assert_eq!(crs["base_crs"]["id"]["authority"], "EPSG");
+    assert_eq!(crs["base_crs"]["id"]["code"], 4326);
+    assert_eq!(
+        crs["base_crs"]["coordinate_system"]["subtype"],
+        "ellipsoidal"
+    );
+    assert_eq!(
+        crs["base_crs"]["coordinate_system"]["axis"]
+            .as_array()
+            .expect("base CRS axes")
+            .len(),
+        2
+    );
+    let repeated_path = temp.path().join("utm-repeated.parquet");
+    write_geoparquet(
+        &repeated_path,
+        &georeferenced,
+        GeoParquetWriteOptions::default(),
+    )?;
+    assert_eq!(std::fs::read(&path)?, std::fs::read(&repeated_path)?);
 
     let conflict_path = temp.path().join("conflict.parquet");
     let mut first = feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7);
