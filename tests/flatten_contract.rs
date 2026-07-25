@@ -23,6 +23,38 @@ fn straight_cubic_collapses_to_endpoints() -> Result<(), Box<dyn std::error::Err
 }
 
 #[test]
+fn tolerance_collapsed_closed_cubic_preserves_a_valid_zero_length_line()
+-> Result<(), Box<dyn std::error::Error>> {
+    let anchor = point(10.0, 20.0);
+    let closed = CubicBezier::new(anchor, point(10.25, 20.0), point(10.0, 20.25), anchor);
+
+    let flattened = flatten_cubic(&closed, FlattenOptions::new(0.5)?)?;
+
+    assert_eq!(flattened.line.points(), &[anchor, anchor]);
+    assert_eq!(flattened.subdivision_count, 0);
+    Ok(())
+}
+
+#[test]
+fn tolerance_collapsed_closed_path_preserves_a_valid_zero_length_line()
+-> Result<(), Box<dyn std::error::Error>> {
+    let anchor = point(10.0, 20.0);
+    let path = CubicPath::new(vec![CubicBezier::new(
+        anchor,
+        point(10.25, 20.0),
+        point(10.0, 20.25),
+        anchor,
+    )])?;
+
+    let flattened =
+        flatten_cubic_path(&path, vec!["closed".to_owned()], FlattenOptions::new(0.5)?)?;
+
+    assert_eq!(flattened.line.points(), &[anchor, anchor]);
+    assert_eq!(flattened.subdivision_count, 0);
+    Ok(())
+}
+
+#[test]
 fn sampled_curve_stays_within_requested_directed_bound() -> Result<(), Box<dyn std::error::Error>> {
     let cubic = CubicBezier::new(
         point(1.0, 0.0),
