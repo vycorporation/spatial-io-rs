@@ -1,6 +1,6 @@
 # spatial-io Bootstrap Design
 
-**Status:** Proposed for written review
+**Status:** Approved with GeoTIFF-reference revision
 **Date:** 2026-07-25
 **Repository:** `vycorporation/spatial-io-rs`
 **Visibility:** Public
@@ -12,12 +12,13 @@ primitives into standards-valid spatial artifacts. Its coordinate model will
 support pixel space, local or engineering space, and georeferenced world space
 without treating all spatial data as geographic.
 
-The first product need is write-oriented: export current cubic Bezier geometry
-from `vycorporation/vectorizer-rs` and future geometry from the
-`vycorporation/rerun` fork. The repository name deliberately does not include
+The first product need is to convert current cubic Bezier geometry from
+`vycorporation/vectorizer-rs` and future geometry from the
+`vycorporation/rerun` fork into non-geographic or georeferenced linework.
+Georeferencing may be supplied explicitly or read from the GeoTIFF that
+produced the curves. The repository name deliberately does not include
 `export` because validated readers and additional format adapters may be added
-later under separate issues. The bootstrap will not implement speculative
-readers.
+later without renaming the crate.
 
 ## Repository and Package Identity
 
@@ -50,7 +51,7 @@ It returns either:
 
 Consumers own adapters into this interface. The public interface will not
 expose Arrow, Parquet, DataFusion, Rerun, vectorizer, image, wgpu, Whitebox,
-GDAL, PROJ, or GEOS types.
+GeoTIFF-reader, GDAL, PROJ, or GEOS types.
 
 ## Coordinate Model
 
@@ -65,6 +66,13 @@ Conversions may include an explicit six-coefficient affine transform.
 Coordinate conversion is never inferred from dimensions, filenames, or
 attribute names.
 
+Pixel coordinates declare whether integer coordinates refer to pixel corners
+or centers. A GeoTIFF adapter preserves PixelIsArea or PixelIsPoint and returns
+a corner-normalized affine plus the original raster interpretation. A caller
+must still declare how its generated primitive coordinates are anchored; the
+library does not assume that curve coordinates inherit the source raster's
+sample anchoring.
+
 For GeoParquet:
 
 - georeferenced coordinates carry valid PROJJSON;
@@ -77,18 +85,18 @@ For GeoParquet:
 ## Primitive-Neutral Geometry Model
 
 The first public geometry model will be closed and versioned rather than
-pretending every producer emits LineStrings. It will reserve explicit variants
-for:
+pretending every producer emits LineStrings. It defines explicit variants for:
 
-- point and multipoint;
+- point;
 - line string and multilinestring;
-- polygon and multipolygon with holes;
 - cubic Bezier path segments; and
 - future approved analytic or vector-native primitives.
 
 New primitive variants require explicit conversion and compatibility review.
-The model will be non-exhaustive to downstream consumers where Rust
-compatibility requires it.
+Multipoint, polygon, and multipolygon variants are deferred until a concrete
+consumer contract and, for polygonal types, topology evidence exist. The model
+will be non-exhaustive to downstream consumers where Rust compatibility
+requires it.
 
 Each writer or conversion profile declares whether a primitive:
 
@@ -143,6 +151,66 @@ from attributes; `spatial-io` preserves attributes and geometry in spatial
 artifacts. Adapters may connect the two without either crate owning the other
 crate's product behavior.
 
+## GeoTIFF Reference Input
+
+The first read path is deliberately narrow: read the spatial reference needed
+to map pixel or native-image coordinates into model coordinates. It does not
+make raster decoding part of the core geometry API.
+
+The optional `geotiff` feature will use the pure-Rust
+`geotiff-reader`/`geotiff-core` 0.7 line. This implementation was selected over
+the current Whitebox high-level adapter because it preserves both
+`ModelPixelScaleTag` plus `ModelTiepointTag` and
+`ModelTransformationTag`, and it normalizes PixelIsArea/PixelIsPoint
+semantics without discarding rotation or skew. Whitebox Next Gen remains a
+credible future broader-raster adapter and an interoperability reference, but
+the first implementation must not wrap a path known to flatten full affine
+metadata.
+
+The GeoTIFF reference reader returns crate-owned values containing:
+
+- image dimensions and band count;
+- the exact six-coefficient corner-normalized affine;
+- original PixelIsArea or PixelIsPoint interpretation;
+- EPSG authority identity when recognized;
+- complete caller-supplied PROJJSON when required for custom CRS output;
+- nodata text when present; and
+- a source-format and dependency-version provenance record.
+
+Recognized EPSG codes are resolved to standards-valid PROJJSON through an
+isolated, exact-version dependency. A user-defined or unsupported CRS fails
+with a typed error unless the caller supplies matching PROJJSON explicitly.
+The adapter never relabels unknown coordinates as WGS84.
+
+GeoTIFF, BigTIFF, tiled COG layout, rotated/skewed affine transforms,
+PixelIsArea, and PixelIsPoint are in the fixture profile. Remote HTTP range
+reading, raster warping, automatic band interpretation, alpha/mask fusion, and
+reprojection are deferred.
+
+## Dependency Policy
+
+The first implementation pins current pure-Rust libraries behind crate-owned
+interfaces:
+
+- `geo-types` 0.7 for established geometry interoperability in private
+  adapters and tests;
+- `wkb` 0.9 for OGC WKB encoding and independent decoding;
+- Apache Arrow/Parquet 58 plus `geoparquet` 0.8 for GeoParquet 1.1 writing and
+  validation;
+- `geotiff-reader` and `geotiff-core` 0.7 for exact local GeoTIFF spatial
+  metadata; and
+- an EPSG-to-PROJJSON resolver pinned to an exact version and isolated behind
+  the crate-owned CRS contract.
+
+DuckDB Spatial, SedonaDB, QGIS, and GeoArrow are consumers used for
+interoperability validation, not runtime dependencies of the core library.
+Database engines are not embedded merely to serialize geometry.
+
+Dependencies must be maintained, documented, compatible with Rust 1.89, and
+free of required system GDAL, PROJ, or GEOS installations. Any dependency that
+silently drops CRS, affine, raster anchoring, or attribute information is
+rejected or wrapped with typed validation.
+
 ## Format Roadmap
 
 The first durable writer is:
@@ -154,9 +222,9 @@ The next likely writer is:
 - GeoJSON for inspectability and independent reference fixtures.
 
 FlatGeobuf and other spatial formats require separate evidence-backed issues.
-Reading GeoParquet, GeoJSON, or raster formats is not part of the first
-implementation. The broader name permits future readers only after a concrete
-consumer and contract exist.
+Reading GeoParquet or GeoJSON is not part of the first implementation. The
+only initial reader is the optional, metadata-focused GeoTIFF reference
+adapter described above.
 
 The GeoParquet writer will:
 
@@ -173,7 +241,7 @@ The GeoParquet writer will:
 
 `vectorizer-rs` remains authoritative for:
 
-- raster decoding and raster compute;
+- its current raster decoding and raster compute;
 - contour tracing and cubic fitting;
 - canonical cubic geometry;
 - geometry audits;
@@ -182,7 +250,9 @@ The GeoParquet writer will:
 - per-image and batch artifact contracts.
 
 Its future adapter will translate audited `CubicBezier` records and coordinate
-metadata into `spatial-io` source features. `spatial-io` will derive portable
+metadata into `spatial-io` source features. For GeoTIFF inputs it may ask
+`spatial-io` to read the source spatial reference while retaining the
+vectorizer's exact raster-compute contract. `spatial-io` will derive portable
 linework or later validated polygonal output without changing the canonical
 cubic rows.
 
@@ -277,19 +347,24 @@ attributes, metadata, and report identities are deterministic.
 
 ## Testing and Validation
 
-The implementation plan will require:
+The bootstrap implementation plan requires:
 
 - exact fixtures for pixel, local, and georeferenced coordinates;
 - direct primitive round-trip tests where the format supports the primitive;
 - bounded-approximation tests for cubic and later analytic curves;
-- topology fixtures for shells, holes, multipart geometry, invalid rings, and
-  closed non-polygonal paths;
+- rejection of unsupported polygon promotion and preservation of closed paths
+  as linework;
 - GeoParquet 1.1 metadata-schema validation;
-- independent interoperability checks in DuckDB Spatial, QGIS, and an
-  Arrow/GeoArrow-family reader for supported output;
+- independent programmatic validation through the Parquet, GeoParquet, and WKB
+  libraries;
 - deterministic output and provenance tests;
 - resource-limit and atomic-publication tests; and
-- consumer adapter contract tests in `vectorizer-rs` and Rerun.
+- documentation of the future consumer adapter boundaries in `vectorizer-rs`
+  and Rerun.
+
+Manual QGIS validation, DuckDB Spatial and SedonaDB interoperability, topology
+fixtures, and consumer adapter contract tests belong to follow-up issues. They
+must not be checked speculatively as bootstrap evidence.
 
 The repository gate is:
 
@@ -303,7 +378,9 @@ git diff --check
 
 ## Explicit Non-Goals for the Bootstrap
 
-- raster, GeoTIFF, COG, or image decoding;
+- making general-purpose raster pixels part of the core geometry model;
+- remote COG access or raster warping;
+- automatic imagery band, alpha, or mask interpretation;
 - GeoParquet or GeoJSON reading;
 - rendering or visual styling;
 - replacing vectorizer-native cubic artifacts;
@@ -318,7 +395,9 @@ git diff --check
 
 1. Bootstrap and validate the public `spatial-io` library repository.
 2. Implement the primitive, coordinate, attribute, and conversion contracts.
-3. Implement GeoParquet 1.1 WKB linework export with cubic approximation.
-4. Add topology-proved polygonal output.
-5. Add the Rerun and vectorizer adapters through separate issues.
-6. Add later readers or writers only when a concrete consumer requires them.
+3. Implement deterministic cubic-to-LineString approximation.
+4. Implement the optional GeoTIFF spatial-reference adapter.
+5. Implement GeoParquet 1.1 WKB linework export.
+6. Add topology-proved polygonal output under a later issue.
+7. Add the Rerun and vectorizer adapters through separate issues.
+8. Add later readers or writers only when a concrete consumer requires them.
