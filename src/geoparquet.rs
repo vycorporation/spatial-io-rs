@@ -19,7 +19,7 @@ use sha2::{Digest, Sha256};
 
 use crate::{
     AttributeType, AttributeValue, CoordinateSpace, Crs, FeatureCollectionV1, GeometryV1,
-    LineString, SpatialIoError,
+    LineString, LinearRing, MultiPolygon, Polygon, SpatialIoError,
 };
 
 const RESERVED_COLUMNS: [&str; 7] = [
@@ -58,7 +58,8 @@ pub struct WriteReport {
     pub conversion_profile_ids: Vec<String>,
 }
 
-/// Writes ordered `LineString` features as `GeoParquet` 1.1 WKB.
+/// Writes topology-validated `LineString`, `Polygon`, and `MultiPolygon`
+/// features as `GeoParquet` 1.1 WKB.
 ///
 /// # Errors
 ///
@@ -77,24 +78,27 @@ pub fn write_geoparquet(
         ));
     }
     validate_feature_metadata(collection)?;
-    let lines = collection
+    let geometries = collection
         .features
         .iter()
         .map(|feature| match &feature.geometry {
-            GeometryV1::LineString(line) => Ok(line),
+            geometry @ (GeometryV1::LineString(_)
+            | GeometryV1::Polygon(_)
+            | GeometryV1::MultiPolygon(_)) => Ok(geometry),
             other => Err(SpatialIoError::UnsupportedPrimitive(format!(
-                "GeoParquet bootstrap writer accepts LineString, got {other:?}"
+                "GeoParquet writer accepts LineString, Polygon, or MultiPolygon, got {other:?}"
             ))),
         })
         .collect::<Result<Vec<_>, _>>()?;
-    let row_bounds = lines
+    let row_bounds = geometries
         .iter()
-        .map(|line| bounds(line))
+        .map(|geometry| bounds(geometry))
         .collect::<Result<Vec<_>, _>>()?;
     let bbox = aggregate_bounds(&row_bounds);
     let (crs_json, crs_identity) = resolve_crs(&collection.spatial_reference.coordinate_space)?;
-    let geo_metadata = build_geo_metadata(&crs_json, bbox)?;
-    let batch = build_batch(collection, &lines, &row_bounds)?;
+    let geometry_types = geometry_type_names(&geometries);
+    let geo_metadata = build_geo_metadata(&crs_json, bbox, &geometry_types)?;
+    let batch = build_batch(collection, &geometries, &row_bounds)?;
 
     let parent = path
         .parent()
@@ -214,14 +218,18 @@ fn validate_feature_metadata(collection: &FeatureCollectionV1) -> Result<(), Spa
     Ok(())
 }
 
-fn build_geo_metadata(crs: &serde_json::Value, bbox: [f64; 4]) -> Result<String, SpatialIoError> {
+fn build_geo_metadata(
+    crs: &serde_json::Value,
+    bbox: [f64; 4],
+    geometry_types: &[&str],
+) -> Result<String, SpatialIoError> {
     let value = serde_json::json!({
         "version": "1.1.0",
         "primary_column": "geometry",
         "columns": {
             "geometry": {
                 "encoding": "WKB",
-                "geometry_types": ["LineString"],
+                "geometry_types": geometry_types,
                 "crs": crs,
                 "edges": "planar",
                 "bbox": bbox,
@@ -335,7 +343,7 @@ fn complete_projected_base_crs(
 
 fn build_batch(
     collection: &FeatureCollectionV1,
-    lines: &[&LineString],
+    geometries: &[&GeometryV1],
     row_bounds: &[[f64; 4]],
 ) -> Result<RecordBatch, SpatialIoError> {
     let mut fields = Vec::new();
@@ -399,9 +407,9 @@ fn build_batch(
         )),
     );
     append_attributes(collection, &mut fields, &mut arrays);
-    let wkbs = lines
+    let wkbs = geometries
         .iter()
-        .map(|line| encode_wkb(line))
+        .map(|geometry| encode_wkb(geometry))
         .collect::<Result<Vec<_>, _>>()?;
     push_column(
         &mut fields,
@@ -565,16 +573,35 @@ fn push_column(fields: &mut Vec<Field>, arrays: &mut Vec<ArrayRef>, field: Field
     arrays.push(array);
 }
 
-fn encode_wkb(line: &LineString) -> Result<Vec<u8>, SpatialIoError> {
-    let geometry = geo_types::LineString::new(
-        line.points()
-            .iter()
-            .map(|point| geo_types::Coord {
-                x: point.x(),
-                y: point.y(),
+fn geometry_type_names(geometries: &[&GeometryV1]) -> Vec<&'static str> {
+    ["LineString", "Polygon", "MultiPolygon"]
+        .into_iter()
+        .filter(|candidate| {
+            geometries.iter().any(|geometry| {
+                matches!(
+                    (*candidate, *geometry),
+                    ("LineString", GeometryV1::LineString(_))
+                        | ("Polygon", GeometryV1::Polygon(_))
+                        | ("MultiPolygon", GeometryV1::MultiPolygon(_))
+                )
             })
-            .collect(),
-    );
+        })
+        .collect()
+}
+
+fn encode_wkb(geometry: &GeometryV1) -> Result<Vec<u8>, SpatialIoError> {
+    match geometry {
+        GeometryV1::LineString(line) => encode_line_string_wkb(line),
+        GeometryV1::Polygon(polygon) => encode_polygon_wkb(polygon),
+        GeometryV1::MultiPolygon(multipolygon) => encode_multi_polygon_wkb(multipolygon),
+        other => Err(SpatialIoError::UnsupportedPrimitive(format!(
+            "GeoParquet writer accepts LineString, Polygon, or MultiPolygon, got {other:?}"
+        ))),
+    }
+}
+
+fn encode_line_string_wkb(line: &LineString) -> Result<Vec<u8>, SpatialIoError> {
+    let geometry = to_geo_line_string(line.points());
     let mut output = Vec::with_capacity(wkb::writer::line_string_wkb_size(&geometry));
     wkb::writer::write_line_string(
         &mut output,
@@ -585,25 +612,97 @@ fn encode_wkb(line: &LineString) -> Result<Vec<u8>, SpatialIoError> {
     Ok(output)
 }
 
-fn bounds(line: &LineString) -> Result<[f64; 4], SpatialIoError> {
+fn encode_polygon_wkb(polygon: &Polygon) -> Result<Vec<u8>, SpatialIoError> {
+    let geometry = to_geo_polygon(polygon);
+    let mut output = Vec::with_capacity(wkb::writer::polygon_wkb_size(&geometry));
+    wkb::writer::write_polygon(
+        &mut output,
+        &geometry,
+        &wkb::writer::WriteOptions::default(),
+    )
+    .map_err(|error| SpatialIoError::Wkb(error.to_string()))?;
+    Ok(output)
+}
+
+fn encode_multi_polygon_wkb(multipolygon: &MultiPolygon) -> Result<Vec<u8>, SpatialIoError> {
+    let geometry =
+        geo_types::MultiPolygon::new(multipolygon.polygons().iter().map(to_geo_polygon).collect());
+    let mut output = Vec::with_capacity(wkb::writer::multi_polygon_wkb_size(&geometry));
+    wkb::writer::write_multi_polygon(
+        &mut output,
+        &geometry,
+        &wkb::writer::WriteOptions::default(),
+    )
+    .map_err(|error| SpatialIoError::Wkb(error.to_string()))?;
+    Ok(output)
+}
+
+fn to_geo_line_string(points: &[crate::Point2]) -> geo_types::LineString<f64> {
+    geo_types::LineString::new(
+        points
+            .iter()
+            .map(|point| geo_types::Coord {
+                x: point.x(),
+                y: point.y(),
+            })
+            .collect(),
+    )
+}
+
+fn to_geo_polygon(polygon: &Polygon) -> geo_types::Polygon<f64> {
+    geo_types::Polygon::new(
+        to_geo_ring(polygon.exterior()),
+        polygon.interiors().iter().map(to_geo_ring).collect(),
+    )
+}
+
+fn to_geo_ring(ring: &LinearRing) -> geo_types::LineString<f64> {
+    to_geo_line_string(ring.points())
+}
+
+fn bounds(geometry: &GeometryV1) -> Result<[f64; 4], SpatialIoError> {
     let mut bounds = [
         f64::INFINITY,
         f64::INFINITY,
         f64::NEG_INFINITY,
         f64::NEG_INFINITY,
     ];
-    for point in line.points() {
-        bounds[0] = bounds[0].min(point.x());
-        bounds[1] = bounds[1].min(point.y());
-        bounds[2] = bounds[2].max(point.x());
-        bounds[3] = bounds[3].max(point.y());
+    match geometry {
+        GeometryV1::LineString(line) => extend_bounds(&mut bounds, line.points()),
+        GeometryV1::Polygon(polygon) => extend_polygon_bounds(&mut bounds, polygon),
+        GeometryV1::MultiPolygon(multipolygon) => {
+            for polygon in multipolygon.polygons() {
+                extend_polygon_bounds(&mut bounds, polygon);
+            }
+        }
+        other => {
+            return Err(SpatialIoError::UnsupportedPrimitive(format!(
+                "GeoParquet writer accepts LineString, Polygon, or MultiPolygon, got {other:?}"
+            )));
+        }
     }
     if bounds.iter().all(|value| value.is_finite()) {
         Ok(bounds)
     } else {
         Err(SpatialIoError::InvalidGeometry(
-            "LineString bounds are non-finite".to_owned(),
+            "geometry bounds are non-finite".to_owned(),
         ))
+    }
+}
+
+fn extend_polygon_bounds(bounds: &mut [f64; 4], polygon: &Polygon) {
+    extend_bounds(bounds, polygon.exterior().points());
+    for interior in polygon.interiors() {
+        extend_bounds(bounds, interior.points());
+    }
+}
+
+fn extend_bounds(bounds: &mut [f64; 4], points: &[crate::Point2]) {
+    for point in points {
+        bounds[0] = bounds[0].min(point.x());
+        bounds[1] = bounds[1].min(point.y());
+        bounds[2] = bounds[2].max(point.x());
+        bounds[3] = bounds[3].max(point.y());
     }
 }
 

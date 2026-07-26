@@ -1,5 +1,5 @@
 {
-  "schema": "spatial_io_interoperability_fixture_matrix_v1",
+  "schema": "spatial_io_interoperability_fixture_matrix_v2",
   "license": "MIT OR Apache-2.0",
   "generator": "examples/generate_interoperability_fixtures.rs",
   "geometry_encoding": "GeoParquet 1.1 WKB",
@@ -54,6 +54,40 @@
       ],
       "byte_length": 7430,
       "sha256": "ca89997bed1c5205056292794971efc45a3eaf2ab08c3317e4a1e37e31c3e1f0"
+    },
+    {
+      "file": "polygon.parquet",
+      "coordinate_space": "local_millimetre",
+      "expected_crs": null,
+      "geometry_types": [
+        "Polygon"
+      ],
+      "feature_count": 1,
+      "bbox": [
+        0.0,
+        0.0,
+        8.0,
+        6.0
+      ],
+      "byte_length": 5078,
+      "sha256": "706687d2593ddfe3257fa2e7a3511208701aca2ea99702d6a03b2954209915a4"
+    },
+    {
+      "file": "multipolygon.parquet",
+      "coordinate_space": "local_millimetre",
+      "expected_crs": null,
+      "geometry_types": [
+        "MultiPolygon"
+      ],
+      "feature_count": 1,
+      "bbox": [
+        10.0,
+        0.0,
+        18.0,
+        5.0
+      ],
+      "byte_length": 5153,
+      "sha256": "5d2f2c2d15e3190156f718d28dc1a3a40c6c6bab165aebff0c0426790191ac0f"
     }
   ]
 }

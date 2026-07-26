@@ -153,6 +153,10 @@ pub enum GeometryV1 {
     MultiLineString(Vec<LineString>),
     /// Exact source cubic geometry requiring a conversion profile for WKB.
     CubicPath(CubicPath),
+    /// One topology-validated polygon with explicit shell and holes.
+    Polygon(crate::Polygon),
+    /// Multiple topology-validated polygons with explicit grouping.
+    MultiPolygon(crate::MultiPolygon),
 }
 
 /// Supported deterministic scalar attribute values.

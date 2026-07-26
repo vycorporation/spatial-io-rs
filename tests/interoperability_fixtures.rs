@@ -40,7 +40,7 @@ fn checked_in_interoperability_matrix_is_attested_and_schema_valid()
 
     assert_eq!(
         manifest.schema,
-        "spatial_io_interoperability_fixture_matrix_v1"
+        "spatial_io_interoperability_fixture_matrix_v2"
     );
     assert_eq!(manifest.license, "MIT OR Apache-2.0");
     assert_eq!(
@@ -48,7 +48,7 @@ fn checked_in_interoperability_matrix_is_attested_and_schema_valid()
         "examples/generate_interoperability_fixtures.rs"
     );
     assert_eq!(manifest.geometry_encoding, "GeoParquet 1.1 WKB");
-    assert_eq!(manifest.fixtures.len(), 3);
+    assert_eq!(manifest.fixtures.len(), 5);
 
     let mut expected_files = manifest
         .fixtures
@@ -81,7 +81,7 @@ fn verify_fixture(path: &Path, fixture: &FixtureRecord) -> Result<(), Box<dyn st
     let bytes = std::fs::read(path)?;
     assert_eq!(u64::try_from(bytes.len())?, fixture.byte_length);
     assert_eq!(hex::encode(Sha256::digest(&bytes)), fixture.sha256);
-    assert_eq!(fixture.geometry_types, ["LineString"]);
+    assert_eq!(fixture.geometry_types.len(), 1);
 
     let file_reader = SerializedFileReader::new(File::open(path)?)?;
     let geo = GeoParquetMetadata::from_parquet_meta(file_reader.metadata().file_metadata())
@@ -90,7 +90,10 @@ fn verify_fixture(path: &Path, fixture: &FixtureRecord) -> Result<(), Box<dyn st
     assert_eq!(geo.primary_column, "geometry");
     let column = serde_json::to_value(&geo.columns["geometry"])?;
     assert_eq!(column["encoding"], "WKB");
-    assert_eq!(column["geometry_types"], serde_json::json!(["LineString"]));
+    assert_eq!(
+        column["geometry_types"],
+        serde_json::json!(fixture.geometry_types)
+    );
     assert_eq!(column["bbox"], serde_json::json!(fixture.bbox));
     match fixture.expected_crs.as_deref() {
         None => assert_eq!(column["crs"], serde_json::Value::Null),
@@ -126,10 +129,22 @@ fn verify_fixture(path: &Path, fixture: &FixtureRecord) -> Result<(), Box<dyn st
         .downcast_ref::<BinaryArray>()
         .expect("binary WKB geometry");
     for index in 0..geometry.len() {
+        let expected = match fixture.geometry_types[0].as_str() {
+            "LineString" => wkb::reader::GeometryType::LineString,
+            "Polygon" => wkb::reader::GeometryType::Polygon,
+            "MultiPolygon" => wkb::reader::GeometryType::MultiPolygon,
+            other => panic!("unexpected fixture geometry type {other}"),
+        };
         assert_eq!(
             wkb::reader::read_wkb(geometry.value(index))?.geometry_type(),
-            wkb::reader::GeometryType::LineString
+            expected
         );
+    }
+    match fixture.file.as_str() {
+        "polygon.parquet" | "multipolygon.parquet" => {
+            assert_eq!(little_endian_u32(geometry.value(0), 5), 2);
+        }
+        _ => {}
     }
 
     assert!(matches!(
@@ -137,4 +152,12 @@ fn verify_fixture(path: &Path, fixture: &FixtureRecord) -> Result<(), Box<dyn st
         "pixel_top_left_y_down_corner" | "local_millimetre" | "georeferenced"
     ));
     Ok(())
+}
+
+fn little_endian_u32(bytes: &[u8], offset: usize) -> u32 {
+    u32::from_le_bytes(
+        bytes[offset..offset + 4]
+            .try_into()
+            .expect("four-byte WKB field"),
+    )
 }

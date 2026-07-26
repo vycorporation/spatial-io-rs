@@ -10,6 +10,7 @@ mod error;
 mod flatten;
 mod model;
 mod reference;
+mod topology;
 
 #[cfg(feature = "geoparquet")]
 mod geoparquet;
@@ -26,6 +27,7 @@ pub use reference::{
     Affine2D, AxisDirection, CoordinateSpace, Crs, PixelAnchor, PixelOrigin, RasterInterpretation,
     SpatialReference, transform_line_string,
 };
+pub use topology::{LinearRing, MultiPolygon, Polygon, RingWinding};
 
 #[cfg(feature = "geoparquet")]
 pub use geoparquet::{GeoParquetWriteOptions, WriteReport, write_geoparquet};
