@@ -105,7 +105,13 @@ RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 git diff --check
 ```
 
-The crate uses Rust 2024 with MSRV 1.89 and forbids unsafe code.
+Ordinary development and release validation use the exact Rust 1.97.1
+toolchain declared in `rust-toolchain.toml`.
+The crate's MSRV is Rust 1.92 so it remains consumable by the current
+`vycorporation/rerun` 0.34 workspace.
+The public model remains crate-owned; Arrow and Parquet 58 stay private to the
+optional GeoParquet adapter.
+The crate uses Rust 2024 and forbids unsafe code.
 
 ## License
 
