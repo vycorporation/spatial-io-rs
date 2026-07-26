@@ -1,4 +1,5 @@
 /target/
 *.parquet
+!fixtures/interoperability/*.parquet
 *.tif
 *.tiff

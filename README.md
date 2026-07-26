@@ -73,6 +73,9 @@ See [`examples/cubic_to_geoparquet.rs`](examples/cubic_to_geoparquet.rs) for
 complete local and georeferenced output construction.
 See [`docs/attributes.md`](docs/attributes.md) for the exact declared-schema
 contract used by integrations such as `vectorizer-rs`.
+See [`fixtures/interoperability/`](fixtures/interoperability/) for the
+checked-in pixel, local, and georeferenced GeoParquet validation matrix and
+exact independent-reader commands.
 
 ## Coordinate and format rules
 
