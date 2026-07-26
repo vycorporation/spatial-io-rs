@@ -1,0 +1,59 @@
+{
+  "schema": "spatial_io_interoperability_fixture_matrix_v1",
+  "license": "MIT OR Apache-2.0",
+  "generator": "examples/generate_interoperability_fixtures.rs",
+  "geometry_encoding": "GeoParquet 1.1 WKB",
+  "fixtures": [
+    {
+      "file": "pixel.parquet",
+      "coordinate_space": "pixel_top_left_y_down_corner",
+      "expected_crs": null,
+      "geometry_types": [
+        "LineString"
+      ],
+      "feature_count": 2,
+      "bbox": [
+        0.0,
+        0.0,
+        20.0,
+        14.0
+      ],
+      "byte_length": 5034,
+      "sha256": "2ffe55d6cf1ef72fbf871644f6fffe2cef1e948077f382be33ecfc030e0d12f1"
+    },
+    {
+      "file": "local.parquet",
+      "coordinate_space": "local_millimetre",
+      "expected_crs": null,
+      "geometry_types": [
+        "LineString"
+      ],
+      "feature_count": 2,
+      "bbox": [
+        -2.5,
+        -3.0,
+        5.5,
+        4.5
+      ],
+      "byte_length": 5034,
+      "sha256": "1c10fa2f05794082982bafb90e2d833e03ca6e3e58da95de8d872a9dc96abb60"
+    },
+    {
+      "file": "epsg-32618.parquet",
+      "coordinate_space": "georeferenced",
+      "expected_crs": "EPSG:32618",
+      "geometry_types": [
+        "LineString"
+      ],
+      "feature_count": 2,
+      "bbox": [
+        499990.0,
+        4399980.0,
+        500025.0,
+        4400020.0
+      ],
+      "byte_length": 7430,
+      "sha256": "ca89997bed1c5205056292794971efc45a3eaf2ab08c3317e4a1e37e31c3e1f0"
+    }
+  ]
+}
