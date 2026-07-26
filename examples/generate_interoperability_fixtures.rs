@@ -7,8 +7,9 @@ mod enabled {
     use serde::Serialize;
     use spatial_io::{
         AttributeFieldV1, AttributeType, AttributeValue, AxisDirection, CoordinateSpace, Crs,
-        FeatureCollectionV1, FeatureV1, GeoParquetWriteOptions, GeometryV1, LineString,
-        PixelAnchor, PixelOrigin, Point2, SpatialReference, WriteReport, write_geoparquet,
+        FeatureCollectionV1, FeatureV1, GeoParquetWriteOptions, GeometryV1, LineString, LinearRing,
+        MultiPolygon, PixelAnchor, PixelOrigin, Point2, Polygon, SpatialReference, WriteReport,
+        write_geoparquet,
     };
 
     #[derive(Serialize)]
@@ -36,6 +37,7 @@ mod enabled {
         &'static str,
         &'static str,
         Option<&'static str>,
+        &'static str,
         FeatureCollectionV1,
     );
 
@@ -51,19 +53,36 @@ mod enabled {
                 "pixel.parquet",
                 "pixel_top_left_y_down_corner",
                 None,
+                "LineString",
                 pixel_collection()?,
             ),
             (
                 "local.parquet",
                 "local_millimetre",
                 None,
+                "LineString",
                 local_collection()?,
             ),
             (
                 "epsg-32618.parquet",
                 "georeferenced",
                 Some("EPSG:32618"),
+                "LineString",
                 utm_collection()?,
+            ),
+            (
+                "polygon.parquet",
+                "local_millimetre",
+                None,
+                "Polygon",
+                polygon_collection()?,
+            ),
+            (
+                "multipolygon.parquet",
+                "local_millimetre",
+                None,
+                "MultiPolygon",
+                multipolygon_collection()?,
             ),
         ];
         let fixtures = cases
@@ -81,13 +100,13 @@ mod enabled {
                 anchor: PixelAnchor::Corner,
             },
             vec![
-                feature(
+                line_feature(
                     "pixel-0",
                     &[(0.0, 0.0), (10.0, 5.0), (20.0, 0.0)],
                     1,
                     Some(0.9),
                 )?,
-                feature("pixel-1", &[(3.0, 10.0), (8.0, 14.0)], 2, None)?,
+                line_feature("pixel-1", &[(3.0, 10.0), (8.0, 14.0)], 2, None)?,
             ],
         ))
     }
@@ -98,13 +117,13 @@ mod enabled {
                 unit: "millimetre".to_owned(),
             },
             vec![
-                feature(
+                line_feature(
                     "local-0",
                     &[(-2.5, 1.0), (0.0, 4.5), (3.0, 2.0)],
                     1,
                     Some(0.75),
                 )?,
-                feature("local-1", &[(1.0, -3.0), (5.5, -1.0)], 2, None)?,
+                line_feature("local-1", &[(1.0, -3.0), (5.5, -1.0)], 2, None)?,
             ],
         ))
     }
@@ -115,7 +134,7 @@ mod enabled {
                 crs: Crs::epsg(32_618)?,
             },
             vec![
-                feature(
+                line_feature(
                     "utm-0",
                     &[
                         (500_000.0, 4_400_000.0),
@@ -125,13 +144,71 @@ mod enabled {
                     1,
                     Some(0.95),
                 )?,
-                feature(
+                line_feature(
                     "utm-1",
                     &[(499_990.0, 4_399_980.0), (500_005.0, 4_399_990.0)],
                     2,
                     None,
                 )?,
             ],
+        ))
+    }
+
+    fn polygon_collection() -> Result<FeatureCollectionV1, spatial_io::SpatialIoError> {
+        let polygon = Polygon::new(
+            ring(&[(0.0, 0.0), (8.0, 0.0), (8.0, 6.0), (0.0, 6.0), (0.0, 0.0)])?,
+            vec![ring(&[
+                (2.0, 2.0),
+                (2.0, 4.0),
+                (4.0, 4.0),
+                (4.0, 2.0),
+                (2.0, 2.0),
+            ])?],
+        )?;
+        Ok(collection(
+            CoordinateSpace::Local {
+                unit: "millimetre".to_owned(),
+            },
+            vec![polygon_feature(
+                "polygon-0",
+                GeometryV1::Polygon(polygon),
+                3,
+            )],
+        ))
+    }
+
+    fn multipolygon_collection() -> Result<FeatureCollectionV1, spatial_io::SpatialIoError> {
+        let multipart = MultiPolygon::new(vec![
+            Polygon::new(
+                ring(&[
+                    (10.0, 0.0),
+                    (13.0, 0.0),
+                    (13.0, 3.0),
+                    (10.0, 3.0),
+                    (10.0, 0.0),
+                ])?,
+                vec![],
+            )?,
+            Polygon::new(
+                ring(&[
+                    (15.0, 2.0),
+                    (18.0, 2.0),
+                    (18.0, 5.0),
+                    (15.0, 5.0),
+                    (15.0, 2.0),
+                ])?,
+                vec![],
+            )?,
+        ])?;
+        Ok(collection(
+            CoordinateSpace::Local {
+                unit: "millimetre".to_owned(),
+            },
+            vec![polygon_feature(
+                "multipolygon-0",
+                GeometryV1::MultiPolygon(multipart),
+                4,
+            )],
         ))
     }
 
@@ -163,16 +240,45 @@ mod enabled {
         }
     }
 
-    fn feature(
+    fn line_feature(
         id: &str,
         points: &[(f64, f64)],
         class_id: u64,
         score: Option<f64>,
     ) -> Result<FeatureV1, spatial_io::SpatialIoError> {
-        Ok(FeatureV1 {
+        Ok(feature(
+            id,
+            GeometryV1::LineString(line(points)?),
+            class_id,
+            score,
+            "interoperability-fixture-v1",
+            "literal_linestring_fixture_v1",
+        ))
+    }
+
+    fn polygon_feature(id: &str, geometry: GeometryV1, class_id: u64) -> FeatureV1 {
+        feature(
+            id,
+            geometry,
+            class_id,
+            Some(1.0),
+            "interoperability-fixture-v2",
+            "literal_polygon_fixture_v1",
+        )
+    }
+
+    fn feature(
+        id: &str,
+        geometry: GeometryV1,
+        class_id: u64,
+        score: Option<f64>,
+        group_id: &str,
+        conversion_profile_id: &str,
+    ) -> FeatureV1 {
+        FeatureV1 {
             feature_id: id.to_owned(),
             source_primitive_id: format!("source-{id}"),
-            geometry: GeometryV1::LineString(line(points)?),
+            geometry,
             attributes: BTreeMap::from([
                 ("class_id".to_owned(), AttributeValue::U64(class_id)),
                 (
@@ -185,10 +291,10 @@ mod enabled {
                 ),
                 ("visible".to_owned(), AttributeValue::Bool(true)),
             ]),
-            group_id: Some("interoperability-fixture-v1".to_owned()),
-            conversion_profile_id: Some("literal_linestring_fixture_v1".to_owned()),
+            group_id: Some(group_id.to_owned()),
+            conversion_profile_id: Some(conversion_profile_id.to_owned()),
             conversion_tolerance: None,
-        })
+        }
     }
 
     fn line(points: &[(f64, f64)]) -> Result<LineString, spatial_io::SpatialIoError> {
@@ -200,27 +306,43 @@ mod enabled {
         )
     }
 
+    fn ring(points: &[(f64, f64)]) -> Result<LinearRing, spatial_io::SpatialIoError> {
+        LinearRing::new(
+            points
+                .iter()
+                .map(|&(x, y)| Point2::new(x, y))
+                .collect::<Result<Vec<_>, _>>()?,
+        )
+    }
+
     fn write_case(output: &Path, case: Case) -> Result<FixtureRecord, spatial_io::SpatialIoError> {
-        let (file, coordinate_space, expected_crs, collection) = case;
+        let (file, coordinate_space, expected_crs, geometry_type, collection) = case;
         let report = write_geoparquet(
             output.join(file),
             &collection,
             GeoParquetWriteOptions { overwrite: true },
         )?;
-        Ok(record(file, coordinate_space, expected_crs, report))
+        Ok(record(
+            file,
+            coordinate_space,
+            expected_crs,
+            geometry_type,
+            report,
+        ))
     }
 
     fn record(
         file: &'static str,
         coordinate_space: &'static str,
         expected_crs: Option<&'static str>,
+        geometry_type: &'static str,
         report: WriteReport,
     ) -> FixtureRecord {
         FixtureRecord {
             file,
             coordinate_space,
             expected_crs,
-            geometry_types: ["LineString"],
+            geometry_types: [geometry_type],
             feature_count: report.feature_count,
             bbox: report.bbox,
             byte_length: report.byte_length,
@@ -233,7 +355,7 @@ mod enabled {
         fixtures: Vec<FixtureRecord>,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let manifest = Manifest {
-            schema: "spatial_io_interoperability_fixture_matrix_v1",
+            schema: "spatial_io_interoperability_fixture_matrix_v2",
             license: "MIT OR Apache-2.0",
             generator: "examples/generate_interoperability_fixtures.rs",
             geometry_encoding: "GeoParquet 1.1 WKB",

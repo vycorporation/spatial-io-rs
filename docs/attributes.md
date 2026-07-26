@@ -32,3 +32,22 @@ let source_schema = vec![AttributeFieldV1 {
 The producer then includes `AttributeValue::Null` (or omits the value) on each
 feature. The resulting Arrow field remains nullable `Float64`; the writer does
 not drop it or guess another type.
+
+## Polygon conversion provenance
+
+Polygon topology is explicit rather than inferred. A producer that creates a
+`Polygon` or `MultiPolygon` should use the reserved provenance fields on
+`FeatureV1` to retain that decision:
+
+- `source_primitive_id` identifies the source curve, path, mask, or other
+  primitive;
+- `group_id` records the producer's shell/hole or multipart grouping identity;
+- `conversion_profile_id` names the polygonization or literal-input contract;
+  and
+- `conversion_tolerance` records a meaningful positive tolerance when the
+  producer used one.
+
+`write_geoparquet` copies these values unchanged for `LineString`, `Polygon`,
+and `MultiPolygon` rows. The library validates topology but does not supply a
+polygonizer, infer ring roles from winding, or invent conversion provenance.
+See [`polygon-topology.md`](polygon-topology.md) for the complete contract.

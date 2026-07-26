@@ -1,7 +1,7 @@
 # spatial-io
 
 `spatial-io` is a reusable Rust library for turning typed spatial primitives
-into portable linework artifacts.
+into portable linework and topology-validated polygonal artifacts.
 It supports pixel, local, and georeferenced coordinates without assuming that
 all spatial data is geographic.
 
@@ -10,7 +10,9 @@ The first release provides:
 - deterministic, tolerance-bounded cubic Bézier to `LineString` conversion;
 - exact six-coefficient affine transformation with explicit pixel anchoring;
 - optional local GeoTIFF spatial-reference reading;
-- optional GeoParquet 1.1 WKB `LineString` writing;
+- explicit, validated linear-ring, polygon, and multipolygon contracts;
+- optional GeoParquet 1.1 WKB `LineString`, `Polygon`, and `MultiPolygon`
+  writing;
 - explicitly typed scalar-attribute schemas, including all-null columns, and
   conversion provenance; and
 - atomic, attested artifact publication.
@@ -73,6 +75,8 @@ See [`examples/cubic_to_geoparquet.rs`](examples/cubic_to_geoparquet.rs) for
 complete local and georeferenced output construction.
 See [`docs/attributes.md`](docs/attributes.md) for the exact declared-schema
 contract used by integrations such as `vectorizer-rs`.
+See [`docs/polygon-topology.md`](docs/polygon-topology.md) before constructing
+polygon output; ring roles and multipart grouping are always explicit.
 See [`fixtures/interoperability/`](fixtures/interoperability/) for the
 checked-in pixel, local, and georeferenced GeoParquet validation matrix and
 exact independent-reader commands.
@@ -87,8 +91,10 @@ exact independent-reader commands.
 - Unknown, pixel, and local GeoParquet coordinates emit explicit `"crs": null`;
   the writer never accidentally implies OGC:CRS84.
 - EPSG identities resolve to PROJJSON for GeoParquet metadata.
-- Closed cubic paths remain linework.
-  Polygon output is deferred until topology is proved.
+- Closed cubic paths and `LineString` values remain linework unless a producer
+  explicitly constructs a validated `Polygon` or `MultiPolygon`.
+- Rings must be explicitly closed and simple. Shell/hole roles never come from
+  winding, and rejected paths are never repaired or auto-promoted.
 
 ## Dependency boundary
 
