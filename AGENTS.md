@@ -3,6 +3,24 @@
 Read this file before changing geometry, coordinate, CRS, GeoTIFF, GeoParquet,
 or publication behavior.
 
+<!-- vy-agentic-change-workflow:v1:start -->
+## Agentic change workflow
+
+This repository follows version 1 of the Vy agentic change workflow.
+
+- Read the root and nearest applicable `AGENTS.md` files and authoritative contract documents before changing files.
+- Bind substantive or decision-bearing work to a GitHub issue or another durable reviewed objective before implementation.
+- Use a short-lived `codex/` branch and a pull request for repository changes; preserve any stricter repository-specific Git or review rules.
+- Use conventional commits and include an explanatory commit body for every non-documentation change.
+- Run the repository's declared validation before merge and report the exact commands and results.
+- Obtain explicit authority for external writes and destructive operations, resolve exact targets first, and preserve unrelated user work.
+- Treat Beast as a placement requirement: run `hostname -s` before SSH and never open a nested SSH connection when already on Beast.
+- Complete work only after delivery, verification, review, merge, and an explicit handoff of any remaining blockers.
+- Keep automatic deletion of merged remote branches separate from guarded cleanup of local branches and worktrees.
+
+Repository-specific instructions may strengthen or specialize this block but may not weaken its safety or verification requirements.
+<!-- vy-agentic-change-workflow:v1:end -->
+
 ## Repository role
 
 `spatial-io` is the reusable, viewer-independent Rust library for converting
