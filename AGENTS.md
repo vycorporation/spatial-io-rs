@@ -28,6 +28,16 @@ typed primitives into non-geographic or georeferenced spatial artifacts.
 Keep the core library independent of `vectorizer-rs`, Rerun, rendering, styling,
 database engines, and system geospatial libraries.
 
+### Vectorizer product naming
+
+**ARIES Vectorizer** is Vy's patented C++ CLI application. Always use its full
+proper name. **vectorizer-rs** is Vy's separate work-in-progress Rust CLI
+application; always write it as `vectorizer-rs`. Both are Vy applications.
+Never shorten either product to "the vectorizer," "our vectorizer," "native
+vectorizer," "native ARIES," or similar shorthand. When comparing them, name
+**ARIES Vectorizer** and `vectorizer-rs` explicitly. Use lowercase
+"vectorizer" only for the generic software category.
+
 ## Contract rules
 
 - Keep public types crate-owned.

@@ -260,7 +260,7 @@ No current `preview.png`, manifest v5, Parquet metadata v2, or
 `vectorizer_per_image_artifact_contract_v5` behavior changes during the
 `spatial-io` bootstrap.
 
-Vectorizer issue `#74` currently mixes reusable spatial conversion with raster
+vectorizer-rs issue `#74` currently mixes reusable spatial conversion with raster
 input and vectorizer artifact concerns. After this specification is approved
 and the replacement issue exists:
 

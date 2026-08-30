@@ -348,7 +348,7 @@ git add README.md CONTEXT.md AGENTS.md docs examples src
 git commit -m "docs: document spatial io workflows"
 ```
 
-### Task 7: Vectorizer and Rerun Ownership References
+### Task 7: vectorizer-rs And Rerun Ownership References
 
 **Files:**
 - Modify in vectorizer worktree: `README.md`
@@ -403,7 +403,7 @@ Use `docs: reference spatial io boundary` in both repositories.
 
 **Interfaces:**
 - Produces a concise source-linked `spatial-io` skill.
-- Routes spatial export away from the vectorizer skill while retaining standalone vectorizer execution guidance.
+- Routes spatial export away from vectorizer-rs skill while retaining standalone vectorizer execution guidance.
 
 - [ ] **Step 1: Record the baseline trigger failure**
 
@@ -415,7 +415,7 @@ Use the repository’s established skill layout. Tell agents to read `README.md`
 
 - [ ] **Step 3: Update vectorizer routing**
 
-Route requests for derived LineStrings, GeoTIFF-affine application, CRS preservation, and GeoParquet output to `spatial-io`. Keep vectorizer runs, timing, curve counts, previews, and canonical curve artifacts in the vectorizer skill.
+Route requests for derived LineStrings, GeoTIFF-affine application, CRS preservation, and GeoParquet output to `spatial-io`. Keep vectorizer runs, timing, curve counts, previews, and canonical curve artifacts in vectorizer-rs skill.
 
 - [ ] **Step 4: Validate skill metadata and behavior surfaces**
 
