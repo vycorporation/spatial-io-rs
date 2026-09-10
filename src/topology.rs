@@ -1,6 +1,8 @@
 //! Explicit polygon topology contracts.
 
+use crate::numeric::{ExactPoint, exact_orientation};
 use serde::{Deserialize, Serialize};
+use std::cmp::Ordering;
 
 use crate::{Point2, SpatialIoError};
 
@@ -57,8 +59,8 @@ impl Polygon {
     /// holes do not form one valid polygonal surface.
     pub fn new(exterior: LinearRing, interiors: Vec<LinearRing>) -> Result<Self, SpatialIoError> {
         for interior in &interiors {
-            if rings_relation(&exterior, interior)? != SegmentRelation::Disjoint
-                || point_in_ring(interior.points()[0], &exterior)? != PointLocation::Inside
+            if rings_relation(&exterior, interior) != SegmentRelation::Disjoint
+                || point_in_ring(interior.points()[0], &exterior) != PointLocation::Inside
             {
                 return Err(invalid(
                     "a polygon interior must lie strictly inside its exterior",
@@ -67,11 +69,11 @@ impl Polygon {
         }
         for first in 0..interiors.len() {
             for second in (first + 1)..interiors.len() {
-                if rings_relation(&interiors[first], &interiors[second])?
+                if rings_relation(&interiors[first], &interiors[second])
                     != SegmentRelation::Disjoint
-                    || point_in_ring(interiors[first].points()[0], &interiors[second])?
+                    || point_in_ring(interiors[first].points()[0], &interiors[second])
                         == PointLocation::Inside
-                    || point_in_ring(interiors[second].points()[0], &interiors[first])?
+                    || point_in_ring(interiors[second].points()[0], &interiors[first])
                         == PointLocation::Inside
                 {
                     return Err(invalid(
@@ -146,9 +148,9 @@ impl LinearRing {
     ///
     /// The first and last points must be exactly equal and at least four
     /// positions must be supplied. Zero-length edges, zero area,
-    /// self-crossing, self-touching, overlapping edges, and non-finite
-    /// topology predicates are rejected. Coordinates are never reordered,
-    /// auto-closed, or repaired.
+    /// self-crossing, self-touching, and overlapping edges are rejected.
+    /// Predicate signs are exact for the finite binary64 coordinates.
+    /// Coordinates are never reordered, auto-closed, or repaired.
     ///
     /// # Errors
     ///
@@ -165,7 +167,7 @@ impl LinearRing {
             return Err(invalid("a linear ring cannot contain a zero-length edge"));
         }
         validate_simple_boundary(&points)?;
-        let area = signed_area_twice(&points)?;
+        let area = winding_sign(&points);
         let winding = if area > 0.0 {
             RingWinding::CounterClockwise
         } else if area < 0.0 {
@@ -244,7 +246,7 @@ fn validate_simple_boundary(points: &[Point2]) -> Result<(), SpatialIoError> {
                 points[first + 1],
                 points[second],
                 points[second + 1],
-            )?;
+            );
             if (adjacent && relation != SegmentRelation::Touch)
                 || (!adjacent && relation != SegmentRelation::Disjoint)
             {
@@ -257,22 +259,29 @@ fn validate_simple_boundary(points: &[Point2]) -> Result<(), SpatialIoError> {
     Ok(())
 }
 
-fn signed_area_twice(points: &[Point2]) -> Result<f64, SpatialIoError> {
-    let mut area = 0.0;
-    for edge in points.windows(2) {
-        let term = edge[0]
-            .x()
-            .mul_add(edge[1].y(), -(edge[1].x() * edge[0].y()));
-        area += term;
-        if !term.is_finite() || !area.is_finite() {
-            return Err(invalid("linear ring area evaluation overflowed"));
-        }
-    }
-    Ok(area)
+// A simple ring's lexicographically least vertex is convex. Its turn has
+// the same sign as the signed area, without summing translated products.
+fn winding_sign(points: &[Point2]) -> f64 {
+    let count = points.len() - 1;
+    let index = (0..count)
+        .min_by(|&a, &b| point_order(points[a], points[b]))
+        .unwrap();
+    orientation(
+        points[(index + count - 1) % count],
+        points[index],
+        points[(index + 1) % count],
+    )
+}
+
+fn point_order(a: Point2, b: Point2) -> Ordering {
+    a.x()
+        .partial_cmp(&b.x())
+        .unwrap()
+        .then_with(|| a.y().partial_cmp(&b.y()).unwrap())
 }
 
 fn validate_disjoint_polygons(first: &Polygon, second: &Polygon) -> Result<(), SpatialIoError> {
-    match polygons_boundary_relation(first, second)? {
+    match polygons_boundary_relation(first, second) {
         SegmentRelation::Cross | SegmentRelation::Overlap => {
             return Err(invalid(
                 "multipolygon components may not cross or share boundary segments",
@@ -280,97 +289,122 @@ fn validate_disjoint_polygons(first: &Polygon, second: &Polygon) -> Result<(), S
         }
         SegmentRelation::Disjoint | SegmentRelation::Touch => {}
     }
-    if exterior_has_point_inside(first, second)? || exterior_has_point_inside(second, first)? {
+    if exterior_has_point_inside(first, second) || exterior_has_point_inside(second, first) {
         return Err(invalid("multipolygon component interiors must be disjoint"));
     }
     Ok(())
 }
 
-fn exterior_has_point_inside(
-    candidate: &Polygon,
-    container: &Polygon,
-) -> Result<bool, SpatialIoError> {
-    candidate
-        .exterior()
-        .points()
-        .iter()
-        .take(candidate.exterior().points().len() - 1)
-        .try_fold(false, |inside, &point| {
-            Ok(inside || point_in_polygon(point, container)? == PointLocation::Inside)
-        })
+fn exterior_has_point_inside(candidate: &Polygon, container: &Polygon) -> bool {
+    for edge in candidate.exterior().points().windows(2) {
+        // Proper crossings and shared segments have already been rejected.
+        // Every remaining contact within this edge is a container vertex.
+        let mut contacts = vec![edge[0], edge[1]];
+        for ring in std::iter::once(container.exterior()).chain(container.interiors()) {
+            for &point in ring.points() {
+                if orientation(edge[0], edge[1], point) == 0.0
+                    && on_segment(edge[0], edge[1], point)
+                {
+                    contacts.push(point);
+                }
+            }
+        }
+        contacts.sort_by(|&a, &b| point_order(a, b));
+        contacts.dedup();
+        // An open span contains no boundary intersection, so its location is
+        // constant. Exact rational midpoints cannot round back to an endpoint.
+        for span in contacts.windows(2) {
+            if exact_point_in_polygon(&ExactPoint::midpoint(span[0], span[1]), container)
+                == PointLocation::Inside
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
-fn point_in_polygon(point: Point2, polygon: &Polygon) -> Result<PointLocation, SpatialIoError> {
-    match point_in_ring(point, polygon.exterior())? {
-        PointLocation::Outside => Ok(PointLocation::Outside),
-        PointLocation::Boundary => Ok(PointLocation::Boundary),
+fn exact_point_in_polygon(point: &ExactPoint, polygon: &Polygon) -> PointLocation {
+    match exact_point_in_ring(point, polygon.exterior()) {
+        PointLocation::Outside => PointLocation::Outside,
+        PointLocation::Boundary => PointLocation::Boundary,
         PointLocation::Inside => {
             for interior in polygon.interiors() {
-                match point_in_ring(point, interior)? {
-                    PointLocation::Inside => return Ok(PointLocation::Outside),
-                    PointLocation::Boundary => return Ok(PointLocation::Boundary),
+                match exact_point_in_ring(point, interior) {
+                    PointLocation::Inside => return PointLocation::Outside,
+                    PointLocation::Boundary => return PointLocation::Boundary,
                     PointLocation::Outside => {}
                 }
             }
-            Ok(PointLocation::Inside)
+            PointLocation::Inside
         }
     }
 }
 
-fn point_in_ring(point: Point2, ring: &LinearRing) -> Result<PointLocation, SpatialIoError> {
+fn exact_point_in_ring(point: &ExactPoint, ring: &LinearRing) -> PointLocation {
     let mut inside = false;
     for edge in ring.points().windows(2) {
-        if orientation(edge[0], edge[1], point)? == 0.0 && on_segment(edge[0], edge[1], point) {
-            return Ok(PointLocation::Boundary);
+        let a = ExactPoint::from(edge[0]);
+        let b = ExactPoint::from(edge[1]);
+        let turn = exact_orientation(&a, &b, point);
+        if turn == Ordering::Equal
+            && ((a.x <= point.x && point.x <= b.x) || (b.x <= point.x && point.x <= a.x))
+            && ((a.y <= point.y && point.y <= b.y) || (b.y <= point.y && point.y <= a.y))
+        {
+            return PointLocation::Boundary;
         }
-        let crosses_y = (edge[0].y() > point.y()) != (edge[1].y() > point.y());
-        if crosses_y {
-            let x_at_y = (edge[1].x() - edge[0].x()).mul_add(
-                (point.y() - edge[0].y()) / (edge[1].y() - edge[0].y()),
-                edge[0].x(),
-            );
-            if !x_at_y.is_finite() {
-                return Err(invalid("point-in-ring evaluation overflowed"));
-            }
-            if point.x() < x_at_y {
-                inside = !inside;
-            }
+        if (a.y > point.y) != (b.y > point.y) && (turn == Ordering::Greater) == (b.y > a.y) {
+            inside = !inside;
         }
     }
-    Ok(if inside {
+    if inside {
         PointLocation::Inside
     } else {
         PointLocation::Outside
-    })
+    }
 }
 
-fn polygons_boundary_relation(
-    first: &Polygon,
-    second: &Polygon,
-) -> Result<SegmentRelation, SpatialIoError> {
+fn point_in_ring(point: Point2, ring: &LinearRing) -> PointLocation {
+    let mut inside = false;
+    for edge in ring.points().windows(2) {
+        let turn = orientation(edge[0], edge[1], point);
+        if turn == 0.0 && on_segment(edge[0], edge[1], point) {
+            return PointLocation::Boundary;
+        }
+        if (edge[0].y() > point.y()) != (edge[1].y() > point.y())
+            && (turn > 0.0) == (edge[1].y() > edge[0].y())
+        {
+            inside = !inside;
+        }
+    }
+    if inside {
+        PointLocation::Inside
+    } else {
+        PointLocation::Outside
+    }
+}
+
+fn polygons_boundary_relation(first: &Polygon, second: &Polygon) -> SegmentRelation {
     let mut aggregate = SegmentRelation::Disjoint;
     for first_ring in std::iter::once(first.exterior()).chain(first.interiors()) {
         for second_ring in std::iter::once(second.exterior()).chain(second.interiors()) {
-            aggregate = stronger(aggregate, rings_relation(first_ring, second_ring)?);
+            aggregate = stronger(aggregate, rings_relation(first_ring, second_ring));
         }
     }
-    Ok(aggregate)
+    aggregate
 }
 
-fn rings_relation(
-    first: &LinearRing,
-    second: &LinearRing,
-) -> Result<SegmentRelation, SpatialIoError> {
+fn rings_relation(first: &LinearRing, second: &LinearRing) -> SegmentRelation {
     let mut aggregate = SegmentRelation::Disjoint;
     for first_edge in first.points().windows(2) {
         for second_edge in second.points().windows(2) {
             aggregate = stronger(
                 aggregate,
-                segment_relation(first_edge[0], first_edge[1], second_edge[0], second_edge[1])?,
+                segment_relation(first_edge[0], first_edge[1], second_edge[0], second_edge[1]),
             );
         }
     }
-    Ok(aggregate)
+    aggregate
 }
 
 const fn stronger(first: SegmentRelation, second: SegmentRelation) -> SegmentRelation {
@@ -383,46 +417,42 @@ const fn stronger(first: SegmentRelation, second: SegmentRelation) -> SegmentRel
     }
 }
 
-fn segment_relation(
-    a: Point2,
-    b: Point2,
-    c: Point2,
-    d: Point2,
-) -> Result<SegmentRelation, SpatialIoError> {
-    let ab_c = orientation(a, b, c)?;
-    let ab_d = orientation(a, b, d)?;
-    let cd_a = orientation(c, d, a)?;
-    let cd_b = orientation(c, d, b)?;
+fn segment_relation(a: Point2, b: Point2, c: Point2, d: Point2) -> SegmentRelation {
+    // Exact range rejection avoids evaluating determinants for separated
+    // edges. Strict comparisons retain all possible boundary contacts.
+    if a.x().max(b.x()) < c.x().min(d.x())
+        || c.x().max(d.x()) < a.x().min(b.x())
+        || a.y().max(b.y()) < c.y().min(d.y())
+        || c.y().max(d.y()) < a.y().min(b.y())
+    {
+        return SegmentRelation::Disjoint;
+    }
+    let ab_c = orientation(a, b, c);
+    let ab_d = orientation(a, b, d);
+    let cd_a = orientation(c, d, a);
+    let cd_b = orientation(c, d, b);
 
     if ab_c == 0.0 && ab_d == 0.0 && cd_a == 0.0 && cd_b == 0.0 {
-        return Ok(collinear_relation(a, b, c, d));
+        return collinear_relation(a, b, c, d);
     }
     if opposite(ab_c, ab_d) && opposite(cd_a, cd_b) {
-        return Ok(SegmentRelation::Cross);
+        return SegmentRelation::Cross;
     }
     if (ab_c == 0.0 && on_segment(a, b, c))
         || (ab_d == 0.0 && on_segment(a, b, d))
         || (cd_a == 0.0 && on_segment(c, d, a))
         || (cd_b == 0.0 && on_segment(c, d, b))
     {
-        return Ok(SegmentRelation::Touch);
+        return SegmentRelation::Touch;
     }
-    Ok(SegmentRelation::Disjoint)
+    SegmentRelation::Disjoint
 }
 
-fn orientation(a: Point2, b: Point2, c: Point2) -> Result<f64, SpatialIoError> {
-    let edge_x = b.x() - a.x();
-    let edge_y = b.y() - a.y();
-    let point_x = c.x() - a.x();
-    let point_y = c.y() - a.y();
-    let value = edge_x.mul_add(point_y, -(edge_y * point_x));
-    if [edge_x, edge_y, point_x, point_y, value]
-        .into_iter()
-        .all(f64::is_finite)
-    {
-        Ok(value)
-    } else {
-        Err(invalid("topology orientation evaluation overflowed"))
+fn orientation(a: Point2, b: Point2, c: Point2) -> f64 {
+    match crate::numeric::orientation(a, b, c) {
+        Ordering::Less => -1.0,
+        Ordering::Equal => 0.0,
+        Ordering::Greater => 1.0,
     }
 }
 

@@ -9,6 +9,7 @@
 mod error;
 mod flatten;
 mod model;
+mod numeric;
 mod reference;
 mod topology;
 

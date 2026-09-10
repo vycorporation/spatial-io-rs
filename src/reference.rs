@@ -113,6 +113,7 @@ pub enum CoordinateSpace {
 
 /// Exact six-coefficient affine mapping input `(x, y)` to output `(x, y)`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "Affine2DWire")]
 pub struct Affine2D {
     /// Output x origin.
     pub origin_x: f64,
@@ -153,8 +154,9 @@ impl Affine2D {
         ] {
             crate::model::validate_finite(field, value)?;
         }
-        let determinant = x_scale.mul_add(y_scale, -(x_skew * y_skew));
-        if !determinant.is_finite() || determinant.abs() <= f64::EPSILON {
+        if crate::numeric::determinant_sign(x_scale, x_skew, y_skew, y_scale)
+            == std::cmp::Ordering::Equal
+        {
             return Err(SpatialIoError::InvalidAffine(
                 "linear component is singular".to_owned(),
             ));
@@ -173,8 +175,19 @@ impl Affine2D {
     ///
     /// # Errors
     ///
-    /// Returns an error if the transformed coordinate is non-finite.
+    /// Returns an error for invalid or singular coefficients (including direct
+    /// field mutation), or if the transformed coordinate is non-finite.
     pub fn transform(self, point: Point2, anchor: PixelAnchor) -> Result<Point2, SpatialIoError> {
+        // Coefficients are public: revalidate even values constructed or mutated
+        // without the checked constructor.
+        Self::new(
+            self.origin_x,
+            self.x_scale,
+            self.x_skew,
+            self.origin_y,
+            self.y_skew,
+            self.y_scale,
+        )?;
         let offset = match anchor {
             PixelAnchor::Corner => 0.0,
             PixelAnchor::Center => 0.5,
@@ -211,4 +224,27 @@ pub fn transform_line_string(
     anchor: PixelAnchor,
 ) -> Result<crate::LineString, SpatialIoError> {
     line.try_map(|point| affine.transform(point, anchor))
+}
+
+#[derive(Deserialize)]
+struct Affine2DWire {
+    origin_x: f64,
+    x_scale: f64,
+    x_skew: f64,
+    origin_y: f64,
+    y_skew: f64,
+    y_scale: f64,
+}
+impl TryFrom<Affine2DWire> for Affine2D {
+    type Error = SpatialIoError;
+    fn try_from(value: Affine2DWire) -> Result<Self, Self::Error> {
+        Self::new(
+            value.origin_x,
+            value.x_scale,
+            value.x_skew,
+            value.origin_y,
+            value.y_skew,
+            value.y_scale,
+        )
+    }
 }

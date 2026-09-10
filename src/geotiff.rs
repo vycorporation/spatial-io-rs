@@ -2,6 +2,9 @@
 
 use std::path::{Path, PathBuf};
 
+use geotiff_core::tags::{
+    TAG_GEO_KEY_DIRECTORY, TAG_MODEL_PIXEL_SCALE, TAG_MODEL_TIEPOINT, TAG_MODEL_TRANSFORMATION,
+};
 use geotiff_reader::crs::{CrsKind, RasterType};
 
 use crate::{Affine2D, Crs, RasterInterpretation, SpatialIoError};
@@ -43,7 +46,7 @@ pub fn read_geotiff_reference(path: impl AsRef<Path>) -> Result<GeoTiffReference
             message: error.to_string(),
         })?;
     let transform = file.transform().ok_or(SpatialIoError::MissingAffine)?;
-    let affine = Affine2D::new(
+    let mut affine = Affine2D::new(
         transform.origin_x,
         transform.pixel_width,
         transform.skew_x,
@@ -61,6 +64,47 @@ pub fn read_geotiff_reference(path: impl AsRef<Path>) -> Result<GeoTiffReference
             });
         }
     };
+    // Match the pinned reader's metadata-IFD selection, not its base-image
+    // IFD (which can differ for overview-bearing inputs). Its matrix route
+    // retains raw raster coordinates; only tiepoint/scale is normalized.
+    let metadata_ifd = file
+        .tiff()
+        .ifds()
+        .iter()
+        .find(|ifd| ifd.tag(TAG_GEO_KEY_DIRECTORY).is_some())
+        .or_else(|| {
+            file.tiff().ifds().iter().find(|ifd| {
+                ifd.tag(TAG_MODEL_TRANSFORMATION).is_some()
+                    || (ifd.tag(TAG_MODEL_TIEPOINT).is_some()
+                        && ifd.tag(TAG_MODEL_PIXEL_SCALE).is_some())
+            })
+        });
+    if let Some(matrix) = metadata_ifd.and_then(|ifd| ifd.tag(TAG_MODEL_TRANSFORMATION)) {
+        let values = matrix
+            .value
+            .as_f64_vec()
+            .filter(|values| values.len() == 16)
+            .ok_or_else(|| SpatialIoError::GeoTiff {
+                path: path.to_owned(),
+                message: "invalid ModelTransformation matrix".to_owned(),
+            })?;
+        if !values.iter().all(|value| value.is_finite()) {
+            return Err(SpatialIoError::GeoTiff {
+                path: path.to_owned(),
+                message: "non-finite ModelTransformation matrix".to_owned(),
+            });
+        }
+        if raster_interpretation == RasterInterpretation::PixelIsPoint {
+            affine = Affine2D::new(
+                affine.origin_x - (0.5 * affine.x_scale + 0.5 * affine.x_skew),
+                affine.x_scale,
+                affine.x_skew,
+                affine.origin_y - (0.5 * affine.y_skew + 0.5 * affine.y_scale),
+                affine.y_skew,
+                affine.y_scale,
+            )?;
+        }
+    }
     match file.crs().crs_kind() {
         CrsKind::Horizontal { .. } => {}
         CrsKind::Compound { .. } => {
@@ -84,7 +128,7 @@ pub fn read_geotiff_reference(path: impl AsRef<Path>) -> Result<GeoTiffReference
         affine,
         raster_interpretation,
         crs,
-        adapter_id: "geotiff_reader_0_7_reference_v1",
+        adapter_id: "geotiff_reader_0_7_reference_v2",
         source_path: path.to_owned(),
     })
 }

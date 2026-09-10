@@ -189,3 +189,115 @@ fn rectangle(xmin: f64, ymin: f64, xmax: f64, ymax: f64) -> Result<LinearRing, S
         (xmin, ymin),
     ])?)
 }
+
+#[test]
+fn rejects_inscribed_multipart_interiors_even_when_all_vertices_touch() {
+    let square = Polygon::new(rectangle(0., 0., 2., 2.).unwrap(), vec![]).unwrap();
+    let diamond = Polygon::new(
+        LinearRing::new(points(&[(1., 0.), (2., 1.), (1., 2.), (0., 1.), (1., 0.)]).unwrap())
+            .unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert!(MultiPolygon::new(vec![square.clone(), diamond.clone()]).is_err());
+    assert!(MultiPolygon::new(vec![diamond, square]).is_err());
+}
+
+#[test]
+fn winding_is_translation_and_scale_invariant() {
+    for (offset, size) in [(0., 1.), (1e10, 1.), (1e14, 1.), (0., 1e-200), (0., 1e200)] {
+        let positions = points(&[
+            (offset, offset),
+            (offset + size, offset),
+            (offset + size, offset + size),
+            (offset, offset + size),
+            (offset, offset),
+        ])
+        .unwrap();
+        let ring = LinearRing::new(positions.clone()).unwrap();
+        assert_eq!(ring.winding(), RingWinding::CounterClockwise);
+        assert_eq!(
+            LinearRing::new(positions.into_iter().rev().collect())
+                .unwrap()
+                .winding(),
+            RingWinding::Clockwise
+        );
+    }
+}
+
+#[test]
+fn exact_collinearity_cannot_hide_backtracking() {
+    assert!(
+        LinearRing::new(points(&[(0., 0.), (1.1, 1.1), (0.55, 0.55), (1., 2.), (0., 0.)]).unwrap())
+            .is_err()
+    );
+}
+
+#[test]
+fn inscribed_component_inside_a_hole_remains_disjoint() {
+    let container = Polygon::new(
+        rectangle(-1., -1., 3., 3.).unwrap(),
+        vec![rectangle(0., 0., 2., 2.).unwrap()],
+    )
+    .unwrap();
+    let diamond = Polygon::new(
+        LinearRing::new(points(&[(1., 0.), (2., 1.), (1., 2.), (0., 1.), (1., 0.)]).unwrap())
+            .unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert!(MultiPolygon::new(vec![container, diamond]).is_ok());
+}
+
+#[test]
+fn multipart_contacts_are_checked_between_adjacent_binary64_coordinates() {
+    let unit = f64::from_bits(1);
+    let square = Polygon::new(rectangle(0., 0., 2. * unit, 2. * unit).unwrap(), vec![]).unwrap();
+    let diamond = Polygon::new(
+        LinearRing::new(
+            points(&[
+                (unit, 0.),
+                (2. * unit, unit),
+                (unit, 2. * unit),
+                (0., unit),
+                (unit, 0.),
+            ])
+            .unwrap(),
+        )
+        .unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert!(MultiPolygon::new(vec![square, diamond.clone()]).is_err());
+    let holed = Polygon::new(
+        rectangle(-unit, -unit, 3. * unit, 3. * unit).unwrap(),
+        vec![rectangle(0., 0., 2. * unit, 2. * unit).unwrap()],
+    )
+    .unwrap();
+    assert!(MultiPolygon::new(vec![holed, diamond]).is_ok());
+}
+
+#[test]
+fn multiple_external_contacts_on_one_edge_remain_valid() {
+    let below = Polygon::new(rectangle(0., -2., 4., 0.).unwrap(), vec![]).unwrap();
+    let above = Polygon::new(
+        LinearRing::new(
+            points(&[
+                (0., 1.),
+                (1., 0.),
+                (2., 1.),
+                (3., 0.),
+                (4., 1.),
+                (4., 3.),
+                (0., 3.),
+                (0., 1.),
+            ])
+            .unwrap(),
+        )
+        .unwrap(),
+        vec![],
+    )
+    .unwrap();
+    assert!(MultiPolygon::new(vec![below.clone(), above.clone()]).is_ok());
+    assert!(MultiPolygon::new(vec![above, below]).is_ok());
+}

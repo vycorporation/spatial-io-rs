@@ -8,6 +8,7 @@ use crate::SpatialIoError;
 
 /// A finite two-dimensional coordinate.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "Point2Wire")]
 pub struct Point2 {
     x: f64,
     y: f64,
@@ -62,6 +63,7 @@ impl CubicBezier {
 
 /// An ordered, connected sequence of cubic Bézier segments.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "CubicPathWire")]
 pub struct CubicPath {
     segments: Vec<CubicBezier>,
 }
@@ -96,6 +98,7 @@ impl CubicPath {
 
 /// A `LineString` containing at least two finite points.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "LineStringWire")]
 pub struct LineString {
     points: Vec<Point2>,
 }
@@ -243,5 +246,37 @@ pub(crate) fn validate_finite(field: &'static str, value: f64) -> Result<(), Spa
         Ok(())
     } else {
         Err(SpatialIoError::NonFinite { field, value })
+    }
+}
+
+#[derive(Deserialize)]
+struct Point2Wire {
+    x: f64,
+    y: f64,
+}
+impl TryFrom<Point2Wire> for Point2 {
+    type Error = SpatialIoError;
+    fn try_from(value: Point2Wire) -> Result<Self, Self::Error> {
+        Self::new(value.x, value.y)
+    }
+}
+#[derive(Deserialize)]
+struct CubicPathWire {
+    segments: Vec<CubicBezier>,
+}
+impl TryFrom<CubicPathWire> for CubicPath {
+    type Error = SpatialIoError;
+    fn try_from(value: CubicPathWire) -> Result<Self, Self::Error> {
+        Self::new(value.segments)
+    }
+}
+#[derive(Deserialize)]
+struct LineStringWire {
+    points: Vec<Point2>,
+}
+impl TryFrom<LineStringWire> for LineString {
+    type Error = SpatialIoError;
+    fn try_from(value: LineStringWire) -> Result<Self, Self::Error> {
+        Self::new(value.points)
     }
 }
