@@ -87,7 +87,11 @@ exact independent-reader commands.
   corners or centers.
 - A GeoTIFF reference returns a corner-normalized affine while retaining the
   original `PixelIsArea` or `PixelIsPoint` interpretation.
-- Rotation and skew are preserved.
+- Rotation and skew are preserved. GeoTIFF adapter
+  `geotiff_reader_0_7_reference_v2` normalizes PixelIsPoint matrix origins by
+  half both basis vectors; tiepoint/scale input is already corner-normalized.
+- Finite affine invertibility uses the exact determinant sign, independently
+  of coefficient units. Non-finite transformed coordinates still fail.
 - Unknown, pixel, and local GeoParquet coordinates emit explicit `"crs": null`;
   the writer never accidentally implies OGC:CRS84.
 - EPSG identities resolve to PROJJSON for GeoParquet metadata.

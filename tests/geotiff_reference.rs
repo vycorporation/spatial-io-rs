@@ -102,3 +102,67 @@ fn reads_bigtiff_and_tiled_layouts() -> Result<(), Box<dyn std::error::Error>> {
     assert_eq!(read_geotiff_reference(&tiled)?.width, 32);
     Ok(())
 }
+
+#[test]
+fn normalizes_point_matrix_without_shifting_area_or_tiepoints()
+-> Result<(), Box<dyn std::error::Error>> {
+    use spatial_io::{PixelAnchor, Point2};
+    let temp = tempfile::tempdir()?;
+    let data = Array2::<u8>::zeros((2, 2));
+    for (raster_type, expected_origin, expected_center) in [
+        (RasterType::PixelIsPoint, (8.875, 21.75), (10., 20.)),
+        (RasterType::PixelIsArea, (10., 20.), (11.125, 18.25)),
+    ] {
+        let path = temp.path().join(format!("{raster_type:?}.tif"));
+        GeoTiffBuilder::new(2, 2)
+            .projected_epsg(32618)
+            .raster_type(raster_type)
+            .transform(GeoTransform {
+                origin_x: 10.,
+                pixel_width: 2.,
+                skew_x: 0.25,
+                origin_y: 20.,
+                skew_y: -0.5,
+                pixel_height: -3.,
+            })
+            .write_2d(&path, data.view())?;
+        let r = read_geotiff_reference(&path)?;
+        assert_eq!((r.affine.origin_x, r.affine.origin_y), expected_origin);
+        let center = r
+            .affine
+            .transform(Point2::new(0., 0.)?, PixelAnchor::Center)?;
+        assert_eq!((center.x(), center.y()), expected_center);
+    }
+    Ok(())
+}
+
+#[test]
+fn normalizes_north_up_matrix_and_rejects_nonfinite_matrix_terms()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let data = Array2::<u8>::zeros((2, 2));
+    let mut matrix = [
+        2., 0., 0., 10., 0., -4., 0., 20., 0., 0., 0., 0., 0., 0., 0., 1.,
+    ];
+    let path = temp.path().join("north-up-point.tif");
+    GeoTiffBuilder::new(2, 2)
+        .projected_epsg(32618)
+        .raster_type(RasterType::PixelIsPoint)
+        .transformation_matrix(matrix)
+        .write_2d(&path, data.view())?;
+    let reference = read_geotiff_reference(&path)?;
+    assert_eq!(
+        (reference.affine.origin_x, reference.affine.origin_y),
+        (9., 22.)
+    );
+    assert_eq!(reference.adapter_id, "geotiff_reader_0_7_reference_v2");
+    matrix[2] = f64::NAN;
+    let path = temp.path().join("invalid-point.tif");
+    GeoTiffBuilder::new(2, 2)
+        .projected_epsg(32618)
+        .raster_type(RasterType::PixelIsPoint)
+        .transformation_matrix(matrix)
+        .write_2d(&path, data.view())?;
+    assert!(read_geotiff_reference(&path).is_err());
+    Ok(())
+}

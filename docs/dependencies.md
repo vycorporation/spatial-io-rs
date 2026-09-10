@@ -39,3 +39,18 @@ Dependency updates must:
 4. retain independent GeoParquet metadata and WKB reader assertions;
 5. keep MSRV at or below the repository declaration; and
 6. document any output-affecting change before merge.
+
+## Finite geometry predicates (issue #17)
+
+The core uses private `num-rational` 0.4.2 (`num-bigint`, `num-integer` and
+`num-traits` underneath) to represent binary64 inputs exactly for determinant
+signs and open-span midpoint predicates. A conservative floating-point filter
+handles unambiguous normal determinant signs; cancellation, underflow and
+overflow fall back to exact arithmetic. This corrects unit-dependent affine
+rejection, translated winding, collinearity and multipart containment defects
+without snapping coordinates or exposing dependency-owned types.
+
+This is a pure-Rust numeric dependency, not a topology or geospatial runtime.
+Exact midpoint arithmetic is needed because a valid open span can have no
+representable binary64 interior point. Validation remains pairwise and is not
+intended as a large-polygon spatial-index implementation.

@@ -11,17 +11,20 @@ geometry.
 
 - at least four positions;
 - exact equality between the first and last position;
-- finite coordinates and finite topology calculations;
+- finite coordinates and exact predicate signs;
 - no zero-length edge;
 - non-zero signed area; and
 - a simple boundary: non-adjacent edges cannot cross, touch, or overlap, and
   adjacent edges may meet only at their shared endpoint.
 
 The constructor retains the exact coordinate order. It does not add a closing
-position, remove points, snap coordinates, or reverse winding. Predicates use
-deterministic finite `f64` arithmetic and fail with
-`SpatialIoError::InvalidGeometry` when an intermediate calculation overflows;
-they are not an arbitrary-precision repair engine.
+position, remove points, snap coordinates, or reverse winding. Predicate signs
+use a conservative binary64 filter with private exact rational
+fallback for cancellation, underflow, and overflow. Coordinates remain the
+original finite binary64 values: exact predicates do not snap, repair, or
+reorder them. Winding is obtained from the turn at an extremal vertex of the
+validated simple ring, whose sign equals its signed area without cancellation
+from large coordinate offsets.
 
 `LinearRing::winding` reports the sign of the numeric-coordinate shoelace area:
 positive is `CounterClockwise` and negative is `Clockwise`. This is a report,
@@ -52,7 +55,12 @@ enforce.
 `MultiPolygon::new` requires at least one validated polygon and preserves
 caller order. Component interiors must be disjoint. Components may meet at one
 or more isolated boundary points, but boundary crossings, shared boundary
-segments, overlap, and containment are rejected.
+segments, overlap, and containment are rejected. After rejecting crossings and
+shared segments, the validator splits each exterior edge at every contact with
+the other component's shell or holes and checks each open span. Its exact
+rational midpoint cannot round onto a boundary endpoint, even for adjacent
+binary64 values. This detects inscribed components whose vertices all touch
+another shell while preserving legal isolated contacts and parts inside holes.
 
 Multipart grouping is also explicit: the constructor never merges nearby
 polygons or splits one polygon into components.
