@@ -12,7 +12,7 @@ tests and a reviewed dependency update.
 | `wkb` | `0.9.2` | Little-endian OGC WKB writing and independent fixture decoding | Optional `geoparquet`; private |
 | `geo-types` | `0.7.19` | Private adapter into the WKB writer | Optional `geoparquet`; private |
 | `epsg-utils` | `0.0.3`, exact | Embedded EPSG-to-PROJJSON lookup | Optional `geoparquet`; isolated behind `Crs` |
-| `jsonschema` | `0.58.5` | Complete offline GeoParquet/PROJJSON schema validation | Optional `geoparquet`; default features disabled; private |
+| `jsonschema` | `0.47.0`, exact | Complete offline GeoParquet/PROJJSON schema validation | Optional `geoparquet`; default features disabled; private |
 
 The selected versions support Rust 1.89 and require no system GDAL, PROJ, or
 GEOS installation.
@@ -71,3 +71,11 @@ schemas under `schemas/`, including source hashes and upstream licenses.
 or Python bindings. An explicit offline registry resolves only the bundled
 PROJJSON resource. This keeps structural CRS validation pure Rust and private
 without introducing C PROJ or any system geospatial runtime.
+
+The validator is pinned to 0.47.0 to preserve the consumer's JSON numeric
+parsing policy. Later versions unconditionally enable `serde_json/float_roundtrip`
+through Cargo feature unification, changing unrelated consumer inputs and
+historical fingerprints. A rejecting retriever denies every unbundled HTTP or
+file reference; the embedded official schemas and all structural checks remain
+enabled. Future validator updates must verify the transitive JSON feature tree
+as well as schema conformance. This correction is tracked in issue #21.

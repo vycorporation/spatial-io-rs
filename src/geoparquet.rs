@@ -275,10 +275,21 @@ fn build_schema_validator(schema: &str) -> Result<jsonschema::Validator, String>
         .prepare()
         .map_err(|error| error.to_string())?;
     jsonschema::options()
-        .offline()
+        .with_retriever(RejectExternalSchema)
         .with_registry(&registry)
         .build(&schema)
         .map_err(|error| error.to_string())
+}
+
+struct RejectExternalSchema;
+
+impl jsonschema::Retrieve for RejectExternalSchema {
+    fn retrieve(
+        &self,
+        uri: &jsonschema::Uri<String>,
+    ) -> Result<serde_json::Value, Box<dyn std::error::Error + Send + Sync>> {
+        Err(format!("external schema retrieval is disabled: {uri}").into())
+    }
 }
 
 fn validate_projjson(value: &serde_json::Value) -> Result<(), SpatialIoError> {
@@ -818,5 +829,27 @@ fn publication_error(path: &Path, error: impl std::fmt::Display) -> SpatialIoErr
     SpatialIoError::Publication {
         path: path.to_owned(),
         message: error.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod schema_boundary_tests {
+    use super::build_schema_validator;
+
+    #[test]
+    fn rejects_unbundled_http_and_file_schema_references() {
+        for uri in [
+            "https://example.invalid/schema.json",
+            "file:///tmp/unbundled-schema.json",
+        ] {
+            let schema = serde_json::json!({"$ref": uri}).to_string();
+            let Err(error) = build_schema_validator(&schema) else {
+                panic!("unexpected external schema resolution");
+            };
+            assert!(
+                error.contains("external schema retrieval is disabled"),
+                "{error}"
+            );
+        }
     }
 }
