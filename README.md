@@ -126,6 +126,15 @@ The public model remains crate-owned; Arrow and Parquet 58 stay private to the
 optional GeoParquet adapter.
 The crate uses Rust 2024 and forbids unsafe code.
 
+## Review record
+
+Last reviewed with **Sol 6.1 High** on **2026-10-04**, at commit
+`f9fd833f39c50303c68aea2b6b46782c14d0a6fa`.
+All ten repository validation checks and the Rust 1.92 compatibility check
+passed, including 40 integration tests. The review identified five unresolved
+issues involving cubic flattening tolerance, GeoTIFF CRS identity, PROJJSON
+validation, coordinate provenance, and concurrent publication attestation.
+
 ## License
 
 Licensed under either Apache-2.0 or MIT, at your option.
