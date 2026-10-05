@@ -55,8 +55,11 @@ This is a pure-Rust numeric dependency, not a topology or geospatial runtime.
 Exact midpoint arithmetic is needed because a valid open span can have no
 representable binary64 interior point. Validation remains pairwise and is not
 intended as a large-polygon spatial-index implementation.
-Version 0.1.1 also uses exact rational cubic subdivision and distance
-certification, with private `num-traits` conversion only for output endpoints.
+Version 0.1.1 also uses private `num-bigint` 0.4.8 for exact dyadic cubic
+subdivision and distance certification at a shared binary scale. It reserves
+three denominator bits per subdivision level, so all midpoint divisions are
+exact without repeated rational normalization. Output endpoint conversion uses
+`num-traits`, with a rational fallback for subnormal or overflowing conversion.
 The rounded endpoints are checked against the exact subcurve before accepting
 a chord; an unrepresentable tolerance fails with `ApproximationPrecision`.
 

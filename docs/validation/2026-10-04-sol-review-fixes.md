@@ -28,9 +28,10 @@ CARGO_TARGET_DIR=/tmp/spatial-io-review-msrv cargo +1.92.0 check --locked --offl
 cargo package --list --allow-dirty --offline
 ```
 
-All 49 integration tests passed. New cases exercise translated closed cubics
+All 51 integration tests passed. New cases exercise translated closed cubics
 that cannot meet a sub-ULP tolerance, finite coordinates that previously
-overflowed midpoint addition, rejected GeoTIFF model/authority combinations,
+overflowed midpoint addition, signed subnormal excursions, extreme mixed
+coordinate exponents, rejected GeoTIFF model/authority combinations,
 complete valid and invalid caller PROJJSON, full spatial-reference metadata,
 invalid affine provenance before publication, and 128 concurrent overwrites
 whose reports must each attest their own bytes.
@@ -39,6 +40,12 @@ The dependency tree contains no GDAL, C PROJ, GEOS, database, GUI, or Rerun
 runtime. The optional schema validator has default features disabled and no
 HTTP/file resolver dependencies. The package file list includes both schema
 snapshots and their licenses. No package was published.
+
+An independent review found no remaining correctness issue in the five fixes.
+Its performance finding was resolved by exact dyadic arithmetic. The reviewer
+independently reran all 10 flatten tests and compared 96 mixed, extreme, and
+subnormal exponent cases against the prior rational certificate; all outputs
+and errors matched. The final full validation gate passed after this change.
 
 ## Deterministic artifacts and independent readers
 
@@ -91,3 +98,27 @@ Schema validation checks structure, not authority-database consistency or
 reprojection suitability. External GIS readers do not automatically interpret
 the producer-specific `spatial_io` metadata. A report attests its own published
 artifact; a later writer may replace the same destination path.
+
+## Subdivision performance
+
+The independent review identified a substantial cost in the initial rational
+implementation: 100 unit quarter-circle cubics at tolerance 0.001, with 33
+vertices each, took 740–776 ms in an optimized build, versus 242–247 µs for
+the original uncertified floating subdivision. The final implementation uses
+exact dyadic integer arithmetic instead of repeated rational normalization.
+Subsequent optimized measurements took 16–33 ms for 100 curves, including
+an independent repeat at 31 ms. The paired original implementation took
+234–460 µs as host load varied. The final correction is approximately
+0.16–0.33 ms per such cubic, substantially faster than the initial correction;
+exact certification still costs more than the original floating calculation.
+
+A reproducible optimized benchmark, with no timing assertion or extra
+benchmark dependency, is now part of the repository:
+
+```bash
+cargo bench --bench flatten_batch --no-default-features --locked --offline
+```
+
+These measurements describe this curve, machine, and tolerance. Coordinate
+exponent ranges, tighter tolerances, and output size change the cost; this is
+not a universal throughput claim.

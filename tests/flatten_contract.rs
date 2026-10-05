@@ -164,6 +164,37 @@ fn exact_subdivision_handles_finite_midpoints_that_overflow_naive_addition()
     Ok(())
 }
 
+#[test]
+fn subnormal_tolerance_retains_positive_and_negative_curve_excursions()
+-> Result<(), Box<dyn std::error::Error>> {
+    let smallest = f64::from_bits(1);
+    for sign in [-1.0, 1.0] {
+        let anchor = point(0.0, 0.0);
+        let control = point(sign * 4.0 * smallest, 0.0);
+        let cubic = CubicBezier::new(anchor, control, control, anchor);
+        let derived = flatten_cubic(&cubic, FlattenOptions::new(smallest)?)?;
+        assert_eq!(
+            derived.line.points(),
+            &[anchor, point(sign * 3.0 * smallest, 0.0), anchor],
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn exact_certificate_handles_extreme_mixed_coordinate_exponents()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cubic = CubicBezier::new(
+        point(-f64::MAX, 0.0),
+        point(-f64::from_bits(1), 0.0),
+        point(f64::from_bits(1), 0.0),
+        point(f64::MAX, 0.0),
+    );
+    let derived = flatten_cubic(&cubic, FlattenOptions::new(f64::from_bits(1))?)?;
+    assert_eq!(derived.line.points(), &[cubic.p0, cubic.p3]);
+    Ok(())
+}
+
 fn evaluate(cubic: &CubicBezier, t: f64) -> Point2 {
     let one_minus = 1.0 - t;
     let b0 = one_minus.powi(3);

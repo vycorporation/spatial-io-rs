@@ -5,7 +5,7 @@
 Fixes the five correctness findings from the Sol 6.1 High review of
 `f9fd833` ([issue #19](https://github.com/vycorporation/spatial-io-rs/issues/19)).
 
-- Cubic flattening uses exact De Casteljau subdivision and exact distance
+- Cubic flattening uses exact dyadic De Casteljau subdivision and exact distance
   checks against rounded output chords. It returns `ApproximationPrecision`
   when output endpoint rounding exceeds the tolerance. The conversion profile
   is now `recursive_convex_hull_bound_v2`; coordinate order and source identity
@@ -30,3 +30,5 @@ The deterministic GeoParquet fixture bytes and hashes change because the
 writer version and spatial provenance are now embedded. GeoParquet remains
 version 1.1.0. Exact cubic certification uses more arithmetic than profile v1;
 the maximum subdivision depth remains 32 and no reprojection is introduced.
+An optimized batch benchmark is retained under `benches/flatten_batch.rs`;
+see the validation record for measured certification cost.

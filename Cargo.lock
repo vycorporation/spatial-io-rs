@@ -1601,6 +1601,7 @@ dependencies = [
  "hex",
  "jsonschema",
  "ndarray",
+ "num-bigint",
  "num-rational",
  "num-traits",
  "parquet",

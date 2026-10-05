@@ -136,13 +136,15 @@ The crate uses Rust 2024 and forbids unsafe code.
 
 ## Review record
 
-Last reviewed with **Sol 6.1 High** on **2026-10-04**, at commit
+Last reviewed with **Sol 6.1 High** on **2026-10-04**. The initial review covered commit
 `f9fd833f39c50303c68aea2b6b46782c14d0a6fa`.
 All ten repository validation checks and the Rust 1.92 compatibility check
 passed, including 40 integration tests. The review identified five
 issues involving cubic flattening tolerance, GeoTIFF CRS identity, PROJJSON
 validation, coordinate provenance, and concurrent publication attestation.
 Their corrections are recorded in [0.1.1](CHANGELOG.md).
+The fixes passed an independent review and all 51 integration tests; see the
+[validation record](docs/validation/2026-10-04-sol-review-fixes.md).
 
 ## License
 
