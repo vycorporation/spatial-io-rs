@@ -84,6 +84,7 @@ fn verify_fixture(path: &Path, fixture: &FixtureRecord) -> Result<(), Box<dyn st
     assert_eq!(fixture.geometry_types.len(), 1);
 
     let file_reader = SerializedFileReader::new(File::open(path)?)?;
+    verify_spatial_reference(&file_reader, fixture)?;
     let geo = GeoParquetMetadata::from_parquet_meta(file_reader.metadata().file_metadata())
         .expect("GeoParquet metadata present")?;
     assert_eq!(geo.version, "1.1.0");
@@ -160,4 +161,50 @@ fn little_endian_u32(bytes: &[u8], offset: usize) -> u32 {
             .try_into()
             .expect("four-byte WKB field"),
     )
+}
+
+fn verify_spatial_reference(
+    file_reader: &SerializedFileReader<File>,
+    fixture: &FixtureRecord,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let provenance: serde_json::Value = serde_json::from_str(
+        file_reader
+            .metadata()
+            .file_metadata()
+            .key_value_metadata()
+            .unwrap()
+            .iter()
+            .find(|kv| kv.key == "spatial_io")
+            .expect("complete spatial reference")
+            .value
+            .as_deref()
+            .unwrap(),
+    )?;
+    assert_eq!(provenance["schema"], "spatial_io_spatial_reference_v1");
+    let reference: spatial_io::SpatialReference =
+        serde_json::from_value(provenance["spatial_reference"].clone())?;
+    match fixture.coordinate_space.as_str() {
+        "pixel_top_left_y_down_corner" => assert_eq!(
+            reference.coordinate_space,
+            spatial_io::CoordinateSpace::Pixel {
+                origin: spatial_io::PixelOrigin::TopLeft,
+                y_axis: spatial_io::AxisDirection::Down,
+                anchor: spatial_io::PixelAnchor::Corner
+            }
+        ),
+        "local_millimetre" => assert_eq!(
+            reference.coordinate_space,
+            spatial_io::CoordinateSpace::Local {
+                unit: "millimetre".to_owned()
+            }
+        ),
+        "georeferenced" => assert_eq!(
+            reference.coordinate_space,
+            spatial_io::CoordinateSpace::Georeferenced {
+                crs: spatial_io::Crs::Epsg(32618)
+            }
+        ),
+        other => panic!("unexpected fixture coordinate space {other}"),
+    }
+    Ok(())
 }

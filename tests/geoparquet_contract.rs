@@ -8,6 +8,7 @@ use arrow_array::{Array, BinaryArray, RecordBatch};
 use geoparquet::metadata::GeoParquetMetadata;
 use parquet::arrow::arrow_reader::ParquetRecordBatchReaderBuilder;
 use parquet::file::reader::{FileReader, SerializedFileReader};
+use sha2::{Digest, Sha256};
 use spatial_io::{
     AttributeFieldV1, AttributeType, AttributeValue, AxisDirection, CoordinateSpace, Crs,
     FeatureCollectionV1, FeatureV1, GeoParquetWriteOptions, GeometryV1, LineString, PixelAnchor,
@@ -147,6 +148,212 @@ fn does_not_clobber_existing_destination_by_default() -> Result<(), Box<dyn std:
     );
     assert!(write_geoparquet(&path, &collection, GeoParquetWriteOptions::default()).is_err());
     assert_eq!(std::fs::read(&path)?, b"unrelated");
+    Ok(())
+}
+
+#[test]
+fn rejects_invalid_projjson_before_replacing_a_destination()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("invalid-crs.parquet");
+    std::fs::write(&path, b"unrelated")?;
+    for json in [
+        "{}",
+        r#"{"type":"GeographicCRS","name":"incomplete"}"#,
+        r#"{"type":"GeographicCRS","name":"broken","datum":{},"coordinate_system":{}}"#,
+    ] {
+        let collection = collection(
+            CoordinateSpace::Georeferenced {
+                crs: Crs::ProjJson(json.to_owned()),
+            },
+            vec![feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7)],
+        );
+        assert!(matches!(
+            write_geoparquet(
+                &path,
+                &collection,
+                GeoParquetWriteOptions { overwrite: true }
+            ),
+            Err(spatial_io::SpatialIoError::InvalidProjJson(_))
+        ));
+        assert_eq!(std::fs::read(&path)?, b"unrelated");
+    }
+    Ok(())
+}
+
+#[test]
+fn accepts_valid_caller_projjson_and_rejects_nested_schema_violations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let temp = tempfile::tempdir()?;
+    let mut crs: serde_json::Value = serde_json::from_str(epsg_utils::epsg_to_projjson(4326)?)?;
+    let valid_path = temp.path().join("caller-crs.parquet");
+    let make_collection = |crs: &serde_json::Value| {
+        collection(
+            CoordinateSpace::Georeferenced {
+                crs: Crs::projjson(crs.to_string()).unwrap(),
+            },
+            vec![feature(
+                "a",
+                line(&[(-75.0, 40.0), (-74.0, 41.0)]).unwrap(),
+                7,
+            )],
+        )
+    };
+    write_geoparquet(
+        &valid_path,
+        &make_collection(&crs),
+        GeoParquetWriteOptions::default(),
+    )?;
+    let encoded = serde_json::to_value(read_geo_metadata(&valid_path)?)?;
+    assert_eq!(encoded["columns"]["geometry"]["crs"], crs);
+    crs["coordinate_system"]["axis"][0]["direction"] = serde_json::json!("invalid-direction");
+    let path = temp.path().join("invalid-axis.parquet");
+    assert!(matches!(
+        write_geoparquet(
+            &path,
+            &make_collection(&crs),
+            GeoParquetWriteOptions::default()
+        ),
+        Err(spatial_io::SpatialIoError::InvalidProjJson(_))
+    ));
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn rejects_mutated_affine_provenance_before_publication() -> Result<(), Box<dyn std::error::Error>>
+{
+    let temp = tempfile::tempdir()?;
+    let path = temp.path().join("invalid-affine.parquet");
+    let mut input = collection(
+        pixel_space(),
+        vec![feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7)],
+    );
+    let mut affine = spatial_io::Affine2D::new(0.0, 1.0, 0.0, 0.0, 0.0, 1.0)?;
+    affine.y_scale = 0.0;
+    input.spatial_reference.affine = Some(affine);
+    assert!(matches!(
+        write_geoparquet(&path, &input, GeoParquetWriteOptions::default()),
+        Err(spatial_io::SpatialIoError::InvalidAffine(_))
+    ));
+    assert!(!path.exists());
+    Ok(())
+}
+
+#[test]
+fn preserves_complete_spatial_reference_in_file_metadata() -> Result<(), Box<dyn std::error::Error>>
+{
+    use spatial_io::{Affine2D, RasterInterpretation};
+    let temp = tempfile::tempdir()?;
+    let mut local = collection(
+        CoordinateSpace::Local {
+            unit: "millimetre".to_owned(),
+        },
+        vec![feature("a", line(&[(0.0, 0.0), (1.0, 1.0)])?, 7)],
+    );
+    let local_path = temp.path().join("local.parquet");
+    write_geoparquet(&local_path, &local, GeoParquetWriteOptions::default())?;
+    local.spatial_reference = SpatialReference {
+        coordinate_space: CoordinateSpace::Pixel {
+            origin: PixelOrigin::BottomLeft,
+            y_axis: AxisDirection::Up,
+            anchor: PixelAnchor::Center,
+        },
+        affine: Some(Affine2D::new(100.0, 2.0, 0.25, 200.0, -0.5, -3.0)?),
+        raster_interpretation: Some(RasterInterpretation::PixelIsPoint),
+    };
+    let path = temp.path().join("pixel.parquet");
+    write_geoparquet(&path, &local, GeoParquetWriteOptions::default())?;
+    assert_ne!(
+        Sha256::digest(std::fs::read(local_path)?),
+        Sha256::digest(std::fs::read(&path)?)
+    );
+    let reader = SerializedFileReader::new(File::open(path)?)?;
+    let metadata = reader
+        .metadata()
+        .file_metadata()
+        .key_value_metadata()
+        .unwrap();
+    let reference: serde_json::Value = serde_json::from_str(
+        metadata
+            .iter()
+            .find(|kv| kv.key == "spatial_io")
+            .expect("spatial provenance")
+            .value
+            .as_deref()
+            .unwrap(),
+    )?;
+    assert_eq!(reference["schema"], "spatial_io_spatial_reference_v1");
+    let decoded: SpatialReference = serde_json::from_value(reference["spatial_reference"].clone())?;
+    assert_eq!(decoded, local.spatial_reference);
+    assert_eq!(
+        serde_json::to_value(read_geo_metadata(&temp.path().join("pixel.parquet"))?)?["columns"]["geometry"]
+            ["crs"],
+        serde_json::Value::Null
+    );
+    Ok(())
+}
+
+#[test]
+fn concurrent_overwrite_reports_attest_their_own_input() -> Result<(), Box<dyn std::error::Error>> {
+    use std::sync::{Arc, Barrier};
+    let temp = tempfile::tempdir()?;
+    let target = Arc::new(temp.path().join("concurrent.parquet"));
+    let inputs = (0..4)
+        .map(|i| {
+            collection(
+                pixel_space(),
+                vec![feature(
+                    &format!("feature-{i}"),
+                    line(&[(f64::from(i), 0.0), (f64::from(i), 1.0)]).unwrap(),
+                    7,
+                )],
+            )
+        })
+        .collect::<Vec<_>>();
+    let expected = inputs
+        .iter()
+        .enumerate()
+        .map(|(i, input)| {
+            write_geoparquet(
+                temp.path().join(format!("expected-{i}.parquet")),
+                input,
+                GeoParquetWriteOptions::default(),
+            )
+            .unwrap()
+        })
+        .collect::<Vec<_>>();
+    let barrier = Arc::new(Barrier::new(inputs.len()));
+    let handles = inputs
+        .into_iter()
+        .zip(expected)
+        .map(|(input, expected)| {
+            let target = target.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                let mut correct = true;
+                for _ in 0..32 {
+                    barrier.wait();
+                    // Every thread must complete its barriers, including failures.
+                    correct &= write_geoparquet(
+                        target.as_path(),
+                        &input,
+                        GeoParquetWriteOptions { overwrite: true },
+                    )
+                    .is_ok_and(|report| {
+                        report.sha256 == expected.sha256
+                            && report.byte_length == expected.byte_length
+                    });
+                }
+                correct
+            })
+        })
+        .collect::<Vec<_>>();
+    let results = handles
+        .into_iter()
+        .map(|handle| handle.join().unwrap())
+        .collect::<Vec<_>>();
+    assert!(results.into_iter().all(|correct| correct));
     Ok(())
 }
 

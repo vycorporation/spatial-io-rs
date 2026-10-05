@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use geotiff_core::tags::{
     TAG_GEO_KEY_DIRECTORY, TAG_MODEL_PIXEL_SCALE, TAG_MODEL_TIEPOINT, TAG_MODEL_TRANSFORMATION,
 };
-use geotiff_reader::crs::{CrsKind, RasterType};
+use geotiff_reader::crs::{CrsKind, ModelType, RasterType};
 
 use crate::{Affine2D, Crs, RasterInterpretation, SpatialIoError};
 
@@ -105,8 +105,34 @@ pub fn read_geotiff_reference(path: impl AsRef<Path>) -> Result<GeoTiffReference
             )?;
         }
     }
-    match file.crs().crs_kind() {
-        CrsKind::Horizontal { .. } => {}
+    let crs = horizontal_crs(file.crs())?;
+    Ok(GeoTiffReference {
+        width: file.width(),
+        height: file.height(),
+        band_count: file.band_count(),
+        nodata: file.nodata().map(ToOwned::to_owned),
+        affine,
+        raster_interpretation,
+        crs,
+        adapter_id: "geotiff_reader_0_7_reference_v3",
+        source_path: path.to_owned(),
+    })
+}
+
+fn horizontal_crs(crs: &geotiff_reader::crs::CrsInfo) -> Result<Crs, SpatialIoError> {
+    let code = match crs.crs_kind() {
+        CrsKind::Horizontal {
+            model_type,
+            horizontal,
+        } => match model_type {
+            ModelType::Projected => horizontal.projected_epsg,
+            ModelType::Geographic => horizontal.geodetic_epsg,
+            ModelType::Geocentric | ModelType::Unknown(_) => {
+                return Err(SpatialIoError::UnsupportedCrs(format!(
+                    "GeoTIFF model {model_type:?} cannot georeference supported 2D geometry"
+                )));
+            }
+        },
         CrsKind::Compound { .. } => {
             return Err(SpatialIoError::UnsupportedCrs(
                 "compound horizontal/vertical GeoTIFF CRS is not yet supported".to_owned(),
@@ -119,16 +145,13 @@ pub fn read_geotiff_reference(path: impl AsRef<Path>) -> Result<GeoTiffReference
         }
         CrsKind::Unspecified => return Err(SpatialIoError::MissingCrs),
     }
-    let crs = Crs::epsg(file.epsg().ok_or(SpatialIoError::MissingCrs)?)?;
-    Ok(GeoTiffReference {
-        width: file.width(),
-        height: file.height(),
-        band_count: file.band_count(),
-        nodata: file.nodata().map(ToOwned::to_owned),
-        affine,
-        raster_interpretation,
-        crs,
-        adapter_id: "geotiff_reader_0_7_reference_v2",
-        source_path: path.to_owned(),
-    })
+    .ok_or(SpatialIoError::MissingCrs)?;
+    // GeoTIFF 1.1 reserves 1..=1023, uses 32767 for user-defined
+    // coordinates, and 32768..=65535 for private CRS identities.
+    if !(1024..=32766).contains(&code) {
+        return Err(SpatialIoError::UnsupportedCrs(format!(
+            "GeoTIFF CRS code {code} is reserved, user-defined, or private"
+        )));
+    }
+    Crs::epsg(u32::from(code))
 }

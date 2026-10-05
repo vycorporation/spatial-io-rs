@@ -2,6 +2,10 @@
 
 ## Scope
 
+This records the 0.1.0 fixture validation. The 0.1.1 fixtures have new bytes
+and embedded coordinate provenance; see the
+[2026-10-04 validation](2026-10-04-sol-review-fixes.md) for current evidence.
+
 The checked-in matrix under `fixtures/interoperability/` is the stable,
 redistributable validation input for the current GeoParquet 1.1 WKB
 `LineString`, `Polygon`, and `MultiPolygon` contract. Three synthetic artifacts
@@ -107,9 +111,10 @@ already recorded in the larger real-output validation.
 
 ## Limitations
 
-- Pixel origin, y direction, pixel anchoring, and the local unit are retained
-  in the matrix manifest because GeoParquet has no standard field for those
-  producer semantics. They are not inferred by external GIS readers.
+- At the time of this validation, pixel origin, y direction, pixel anchoring,
+  and the local unit were retained in the matrix manifest. Version 0.1.1 also
+  embeds the full spatial reference in the `spatial_io` Parquet metadata key.
+  External GIS readers do not infer these producer semantics from `crs: null`.
 - The polygon fixtures prove the literal validated topology represented here;
   they do not provide a polygonizer or auto-promote arbitrary closed paths.
 - Reader validation proves interoperability for the versions and observations

@@ -17,6 +17,9 @@ The first three files contain ordered WKB `LineString` geometry.
 and `multipolygon.parquet` contains two explicitly grouped components. Every
 file retains stable source and group identities, conversion provenance,
 non-null scalar attributes, and one nullable floating-point attribute.
+Version 0.1.1 also embeds the complete spatial reference in the `spatial_io`
+metadata key (`spatial_io_spatial_reference_v1`), so pixel conventions and
+local units can be recovered from each file without the matrix manifest.
 `manifest.json` pins geometry types, byte lengths, SHA-256 digests, row counts,
 extents, coordinate-space meaning, and expected CRS.
 

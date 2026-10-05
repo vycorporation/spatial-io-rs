@@ -2,4 +2,5 @@
 *.parquet
 !fixtures/interoperability/*.parquet
 *.tif
+!fixtures/reference-regressions/*.tif
 *.tiff

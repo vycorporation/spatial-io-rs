@@ -46,7 +46,7 @@ pub enum RasterInterpretation {
 pub enum Crs {
     /// EPSG authority code.
     Epsg(u32),
-    /// Caller-provided, validated PROJJSON object.
+    /// Caller-provided PROJJSON object, schema-validated at the format boundary.
     ProjJson(String),
     /// Explicitly unknown or local CRS.
     Unknown,
@@ -68,6 +68,8 @@ impl Crs {
     }
 
     /// Validates that a string contains a JSON object before retaining it.
+    /// The `GeoParquet` writer separately validates the complete CRS against
+    /// the bundled PROJJSON schema, including nested fields.
     ///
     /// # Errors
     ///

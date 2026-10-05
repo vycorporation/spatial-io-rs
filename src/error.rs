@@ -17,6 +17,12 @@ pub enum SpatialIoError {
     /// An approximation tolerance was not finite and positive.
     #[error("flatten tolerance must be finite and greater than zero, got {0}")]
     InvalidTolerance(f64),
+    /// Binary64 output coordinates cannot retain the requested curve precision.
+    #[error("output coordinate rounding cannot certify flatten tolerance {tolerance}")]
+    ApproximationPrecision {
+        /// Requested maximum deviation in input coordinate units.
+        tolerance: f64,
+    },
     /// A geometry did not contain the minimum required coordinates.
     #[error("invalid geometry: {0}")]
     InvalidGeometry(String),

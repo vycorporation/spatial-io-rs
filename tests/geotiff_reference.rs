@@ -6,6 +6,67 @@ use ndarray::Array2;
 use spatial_io::{Crs, RasterInterpretation, read_geotiff_reference};
 
 #[test]
+fn rejects_independently_read_custom_and_missing_projected_crs_fixtures() {
+    use spatial_io::SpatialIoError;
+    let root =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("fixtures/reference-regressions");
+    assert!(matches!(
+        read_geotiff_reference(root.join("user-defined-projected.tif")),
+        Err(SpatialIoError::UnsupportedCrs(_))
+    ));
+    assert!(matches!(
+        read_geotiff_reference(root.join("missing-projected-identity.tif")),
+        Err(SpatialIoError::MissingCrs)
+    ));
+}
+
+#[test]
+fn rejects_non_authority_crs_codes_and_missing_projected_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    use geotiff_writer::ModelType;
+    use spatial_io::SpatialIoError;
+    let temp = tempfile::tempdir()?;
+    let data = Array2::<u8>::zeros((2, 2));
+    for code in [32767, 32768, 65535, 1023] {
+        let path = temp.path().join(format!("non-authority-{code}.tif"));
+        GeoTiffBuilder::new(2, 2)
+            .projected_epsg(code)
+            .pixel_scale(2.0, 3.0)
+            .origin(500_000.0, 4_400_000.0)
+            .write_2d(&path, data.view())?;
+        assert!(matches!(
+            read_geotiff_reference(&path),
+            Err(SpatialIoError::UnsupportedCrs(_))
+        ));
+    }
+    let path = temp.path().join("projected-with-base-only.tif");
+    GeoTiffBuilder::new(2, 2)
+        .geographic_epsg(4326)
+        .model_type(ModelType::Projected)
+        .pixel_scale(2.0, 3.0)
+        .origin(500_000.0, 4_400_000.0)
+        .write_2d(&path, data.view())?;
+    assert!(matches!(
+        read_geotiff_reference(&path),
+        Err(SpatialIoError::MissingCrs)
+    ));
+    for model in [ModelType::Geocentric, ModelType::Unknown(32767)] {
+        let path = temp.path().join(format!("{model:?}.tif"));
+        GeoTiffBuilder::new(2, 2)
+            .geographic_epsg(4326)
+            .model_type(model)
+            .pixel_scale(2.0, 3.0)
+            .origin(100.0, 200.0)
+            .write_2d(&path, data.view())?;
+        assert!(matches!(
+            read_geotiff_reference(&path),
+            Err(SpatialIoError::UnsupportedCrs(_))
+        ));
+    }
+    Ok(())
+}
+
+#[test]
 fn reads_north_up_pixel_is_area_reference() -> Result<(), Box<dyn std::error::Error>> {
     let temp = tempfile::tempdir()?;
     let path = temp.path().join("area.tif");
@@ -155,7 +216,7 @@ fn normalizes_north_up_matrix_and_rejects_nonfinite_matrix_terms()
         (reference.affine.origin_x, reference.affine.origin_y),
         (9., 22.)
     );
-    assert_eq!(reference.adapter_id, "geotiff_reader_0_7_reference_v2");
+    assert_eq!(reference.adapter_id, "geotiff_reader_0_7_reference_v3");
     matrix[2] = f64::NAN;
     let path = temp.path().join("invalid-point.tif");
     GeoTiffBuilder::new(2, 2)

@@ -2,9 +2,9 @@
 
 use std::collections::BTreeSet;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{Read, Seek, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use arrow_array::{
     ArrayRef, BinaryArray, BooleanArray, Float64Array, Int64Array, RecordBatch, StringArray,
@@ -48,7 +48,8 @@ pub struct WriteReport {
     pub feature_count: u64,
     /// Published file length.
     pub byte_length: u64,
-    /// Lowercase SHA-256 digest.
+    /// Lowercase SHA-256 digest of the artifact published by this call.
+    /// A later overwrite can change the destination without changing this report.
     pub sha256: String,
     /// Aggregate `[xmin, ymin, xmax, ymax]`.
     pub bbox: [f64; 4],
@@ -98,6 +99,7 @@ pub fn write_geoparquet(
     let (crs_json, crs_identity) = resolve_crs(&collection.spatial_reference.coordinate_space)?;
     let geometry_types = geometry_type_names(&geometries);
     let geo_metadata = build_geo_metadata(&crs_json, bbox, &geometry_types)?;
+    let spatial_metadata = build_spatial_metadata(&collection.spatial_reference)?;
     let batch = build_batch(collection, &geometries, &row_bounds)?;
 
     let parent = path
@@ -107,11 +109,11 @@ pub fn write_geoparquet(
     let mut temporary =
         tempfile::NamedTempFile::new_in(parent).map_err(|error| publication_error(path, error))?;
     let properties = WriterProperties::builder()
-        .set_created_by("spatial-io 0.1.0".to_owned())
-        .set_key_value_metadata(Some(vec![KeyValue::new(
-            "geo".to_owned(),
-            Some(geo_metadata),
-        )]))
+        .set_created_by(concat!("spatial-io ", env!("CARGO_PKG_VERSION")).to_owned())
+        .set_key_value_metadata(Some(vec![
+            KeyValue::new("geo".to_owned(), Some(geo_metadata)),
+            KeyValue::new("spatial_io".to_owned(), Some(spatial_metadata)),
+        ]))
         .build();
     {
         let mut writer =
@@ -132,6 +134,9 @@ pub fn write_geoparquet(
         .as_file()
         .sync_all()
         .map_err(|error| publication_error(path, error))?;
+    // Attest the staged inode before publishing. Reopening the destination
+    // after rename could read a different concurrent writer's artifact.
+    let (byte_length, sha256) = attest(temporary.as_file_mut(), path)?;
     if options.overwrite {
         temporary
             .persist(path)
@@ -143,7 +148,6 @@ pub fn write_geoparquet(
     }
     sync_parent(parent, path)?;
 
-    let (byte_length, sha256) = attest(path)?;
     let conversion_profile_ids = collection
         .features
         .iter()
@@ -223,6 +227,7 @@ fn build_geo_metadata(
     bbox: [f64; 4],
     geometry_types: &[&str],
 ) -> Result<String, SpatialIoError> {
+    static VALIDATOR: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
     let value = serde_json::json!({
         "version": "1.1.0",
         "primary_column": "geometry",
@@ -244,8 +249,63 @@ fn build_geo_metadata(
             }
         }
     });
-    let _: geoparquet::metadata::GeoParquetMetadata = serde_json::from_value(value.clone())
+    VALIDATOR
+        .get_or_init(|| {
+            build_schema_validator(include_str!("../schemas/geoparquet-v1.1.0.schema.json"))
+        })
+        .as_ref()
+        .map_err(|error| SpatialIoError::GeoParquet(error.clone()))?
+        .validate(&value)
         .map_err(|error| SpatialIoError::GeoParquet(error.to_string()))?;
+    serde_json::to_string(&value).map_err(|error| SpatialIoError::GeoParquet(error.to_string()))
+}
+
+fn build_schema_validator(schema: &str) -> Result<jsonschema::Validator, String> {
+    let schema: serde_json::Value =
+        serde_json::from_str(schema).map_err(|error| error.to_string())?;
+    let projjson: serde_json::Value =
+        serde_json::from_str(include_str!("../schemas/projjson-v0.7.schema.json"))
+            .map_err(|error| error.to_string())?;
+    let registry = jsonschema::Registry::new()
+        .add(
+            "https://proj.org/schemas/v0.7/projjson.schema.json",
+            projjson,
+        )
+        .map_err(|error| error.to_string())?
+        .prepare()
+        .map_err(|error| error.to_string())?;
+    jsonschema::options()
+        .offline()
+        .with_registry(&registry)
+        .build(&schema)
+        .map_err(|error| error.to_string())
+}
+
+fn validate_projjson(value: &serde_json::Value) -> Result<(), SpatialIoError> {
+    static VALIDATOR: OnceLock<Result<jsonschema::Validator, String>> = OnceLock::new();
+    VALIDATOR.get_or_init(|| build_schema_validator(
+        r#"{"$schema":"http://json-schema.org/draft-07/schema#","$ref":"https://proj.org/schemas/v0.7/projjson.schema.json#/definitions/crs"}"#
+    )).as_ref().map_err(|error| SpatialIoError::InvalidProjJson(error.clone()))?
+        .validate(value).map_err(|error| SpatialIoError::InvalidProjJson(error.to_string()))
+}
+
+fn build_spatial_metadata(reference: &crate::SpatialReference) -> Result<String, SpatialIoError> {
+    if let Some(affine) = reference.affine {
+        // Public coefficients may have been mutated since construction.
+        crate::Affine2D::new(
+            affine.origin_x,
+            affine.x_scale,
+            affine.x_skew,
+            affine.origin_y,
+            affine.y_skew,
+            affine.y_scale,
+        )?;
+    }
+    let value = serde_json::json!({
+        "schema": "spatial_io_spatial_reference_v1",
+        "writer_version": env!("CARGO_PKG_VERSION"),
+        "spatial_reference": reference,
+    });
     serde_json::to_string(&value).map_err(|error| SpatialIoError::GeoParquet(error.to_string()))
 }
 
@@ -266,11 +326,7 @@ fn resolve_crs(
         Crs::ProjJson(value) => {
             let parsed: serde_json::Value = serde_json::from_str(value)
                 .map_err(|error| SpatialIoError::InvalidProjJson(error.to_string()))?;
-            if !parsed.is_object() {
-                return Err(SpatialIoError::InvalidProjJson(
-                    "the root value must be an object".to_owned(),
-                ));
-            }
+            validate_projjson(&parsed)?;
             Ok((parsed, "projjson".to_owned()))
         }
         Crs::Epsg(code) => {
@@ -281,6 +337,7 @@ fn resolve_crs(
             let mut parsed = serde_json::from_str(source)
                 .map_err(|error| SpatialIoError::InvalidProjJson(error.to_string()))?;
             complete_projected_base_crs(&mut parsed, *code)?;
+            validate_projjson(&parsed)?;
             Ok((parsed, format!("EPSG:{code}")))
         }
     }
@@ -724,8 +781,9 @@ fn aggregate_bounds(row_bounds: &[[f64; 4]]) -> [f64; 4] {
     )
 }
 
-fn attest(path: &Path) -> Result<(u64, String), SpatialIoError> {
-    let mut file = File::open(path).map_err(|error| publication_error(path, error))?;
+fn attest(file: &mut File, path: &Path) -> Result<(u64, String), SpatialIoError> {
+    file.rewind()
+        .map_err(|error| publication_error(path, error))?;
     let byte_length = file
         .metadata()
         .map_err(|error| publication_error(path, error))?
