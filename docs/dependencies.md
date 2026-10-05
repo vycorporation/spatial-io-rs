@@ -12,6 +12,7 @@ tests and a reviewed dependency update.
 | `wkb` | `0.9.2` | Little-endian OGC WKB writing and independent fixture decoding | Optional `geoparquet`; private |
 | `geo-types` | `0.7.19` | Private adapter into the WKB writer | Optional `geoparquet`; private |
 | `epsg-utils` | `0.0.3`, exact | Embedded EPSG-to-PROJJSON lookup | Optional `geoparquet`; isolated behind `Crs` |
+| `jsonschema` | `0.58.5` | Complete offline GeoParquet/PROJJSON schema validation | Optional `geoparquet`; default features disabled; private |
 
 The selected versions support Rust 1.89 and require no system GDAL, PROJ, or
 GEOS installation.
@@ -54,3 +55,16 @@ This is a pure-Rust numeric dependency, not a topology or geospatial runtime.
 Exact midpoint arithmetic is needed because a valid open span can have no
 representable binary64 interior point. Validation remains pairwise and is not
 intended as a large-polygon spatial-index implementation.
+Version 0.1.1 also uses exact rational cubic subdivision and distance
+certification, with private `num-traits` conversion only for output endpoints.
+The rounded endpoints are checked against the exact subcurve before accepting
+a chord; an unrepresentable tolerance fails with `ApproximationPrecision`.
+
+## Offline schema validation (issue #19)
+
+The optional writer embeds the official GeoParquet 1.1 and PROJJSON v0.7
+schemas under `schemas/`, including source hashes and upstream licenses.
+`jsonschema` has no default features, HTTP resolver, file resolver, TLS engine,
+or Python bindings. An explicit offline registry resolves only the bundled
+PROJJSON resource. This keeps structural CRS validation pure Rust and private
+without introducing C PROJ or any system geospatial runtime.

@@ -18,8 +18,8 @@
         20.0,
         14.0
       ],
-      "byte_length": 5034,
-      "sha256": "2ffe55d6cf1ef72fbf871644f6fffe2cef1e948077f382be33ecfc030e0d12f1"
+      "byte_length": 5268,
+      "sha256": "ff539994094d29e728c295fd355d3831ec03d31db45eb9e4293af41ee8a2246b"
     },
     {
       "file": "local.parquet",
@@ -35,8 +35,8 @@
         5.5,
         4.5
       ],
-      "byte_length": 5034,
-      "sha256": "1c10fa2f05794082982bafb90e2d833e03ca6e3e58da95de8d872a9dc96abb60"
+      "byte_length": 5235,
+      "sha256": "a85850fb68faabb33d1649f6e210dd45b6d31ceaa5a716993a38e47c2c9f4c5e"
     },
     {
       "file": "epsg-32618.parquet",
@@ -52,8 +52,8 @@
         500025.0,
         4400020.0
       ],
-      "byte_length": 7430,
-      "sha256": "ca89997bed1c5205056292794971efc45a3eaf2ab08c3317e4a1e37e31c3e1f0"
+      "byte_length": 7640,
+      "sha256": "28adbc6fcf2dc9cb8d740d6ed46d821494b332974461ea313c8f702561d0b5e5"
     },
     {
       "file": "polygon.parquet",
@@ -69,8 +69,8 @@
         8.0,
         6.0
       ],
-      "byte_length": 5078,
-      "sha256": "706687d2593ddfe3257fa2e7a3511208701aca2ea99702d6a03b2954209915a4"
+      "byte_length": 5279,
+      "sha256": "d6943a4b1dc506bda3db9d244710d801540b358dcf612c05ffdf7c16d3820602"
     },
     {
       "file": "multipolygon.parquet",
@@ -86,8 +86,8 @@
         18.0,
         5.0
       ],
-      "byte_length": 5153,
-      "sha256": "5d2f2c2d15e3190156f718d28dc1a3a40c6c6bab165aebff0c0426790191ac0f"
+      "byte_length": 5354,
+      "sha256": "f01f594095ca1ca895b0b0362790c210f79a754d3dd248b8a6d5352e12f6470a"
     }
   ]
 }

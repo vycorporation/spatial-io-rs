@@ -25,6 +25,7 @@ pub(crate) fn determinant_sign(a: f64, b: f64, c: f64, d: f64) -> Ordering {
     (rational(a) * rational(d) - rational(b) * rational(c)).cmp(&BigRational::default())
 }
 
+#[derive(Clone)]
 pub(crate) struct ExactPoint {
     pub(crate) x: BigRational,
     pub(crate) y: BigRational,

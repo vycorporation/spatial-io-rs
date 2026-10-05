@@ -18,7 +18,7 @@ fn straight_cubic_collapses_to_endpoints() -> Result<(), Box<dyn std::error::Err
     );
     let flattened = flatten_cubic(&straight, FlattenOptions::new(0.01)?)?;
     assert_eq!(flattened.line.points(), &[point(0.0, 0.0), point(3.0, 0.0)]);
-    assert_eq!(flattened.profile_id, "recursive_convex_hull_bound_v1");
+    assert_eq!(flattened.profile_id, "recursive_convex_hull_bound_v2");
     Ok(())
 }
 
@@ -124,6 +124,44 @@ fn rejects_invalid_tolerance_and_disconnected_paths() {
         ),
     ]);
     assert!(disconnected.is_err());
+}
+
+#[test]
+fn subdivision_cannot_silently_round_away_a_translated_curve() {
+    let anchor = point(1e16, 0.0);
+    let control = point(1e16 + 2.0, 0.0);
+    let cubic = CubicBezier::new(anchor, control, control, anchor);
+    // The exact midpoint is anchor.x + 1.5. A zero-length line at the
+    // anchor therefore cannot satisfy the requested 0.1 deviation.
+    assert!(matches!(
+        flatten_cubic(&cubic, FlattenOptions::new(0.1).unwrap()),
+        Err(spatial_io::SpatialIoError::ApproximationPrecision { .. })
+    ));
+    let path = CubicPath::new(vec![cubic]).unwrap();
+    assert!(matches!(
+        flatten_cubic_path(
+            &path,
+            vec!["translated".to_owned()],
+            FlattenOptions::new(0.1).unwrap(),
+        ),
+        Err(spatial_io::SpatialIoError::ApproximationPrecision { .. })
+    ));
+}
+
+#[test]
+fn exact_subdivision_handles_finite_midpoints_that_overflow_naive_addition()
+-> Result<(), Box<dyn std::error::Error>> {
+    let cubic = CubicBezier::new(
+        point(1e308, 0.0),
+        point(1.1e308, 1e307),
+        point(1.1e308, -1e307),
+        point(1e308, 0.0),
+    );
+    let derived = flatten_cubic(&cubic, FlattenOptions::new(1e306)?)?;
+    assert!(derived.subdivision_count > 0);
+    assert_eq!(derived.line.points().first(), Some(&cubic.p0));
+    assert_eq!(derived.line.points().last(), Some(&cubic.p3));
+    Ok(())
 }
 
 fn evaluate(cubic: &CubicBezier, t: f64) -> Point2 {

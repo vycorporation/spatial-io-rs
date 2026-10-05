@@ -88,12 +88,20 @@ exact independent-reader commands.
 - A GeoTIFF reference returns a corner-normalized affine while retaining the
   original `PixelIsArea` or `PixelIsPoint` interpretation.
 - Rotation and skew are preserved. GeoTIFF adapter
-  `geotiff_reader_0_7_reference_v2` normalizes PixelIsPoint matrix origins by
+  `geotiff_reader_0_7_reference_v3` normalizes PixelIsPoint matrix origins by
   half both basis vectors; tiepoint/scale input is already corner-normalized.
 - Finite affine invertibility uses the exact determinant sign, independently
   of coefficient units. Non-finite transformed coordinates still fail.
 - Unknown, pixel, and local GeoParquet coordinates emit explicit `"crs": null`;
   the writer never accidentally implies OGC:CRS84.
+- GeoParquet retains the full spatial reference in versioned `spatial_io`
+  file metadata, including pixel conventions, local units, affine provenance,
+  and raster interpretation. This metadata is provenance, not an instruction
+  to transform geometry that is already in the declared coordinate space.
+- CRS and GeoParquet metadata are schema-validated offline before publication.
+- Cubic profile `recursive_convex_hull_bound_v2` uses exact subdivision and
+  distance predicates against rounded output chords. It fails with a typed
+  precision error when endpoint rounding exceeds the requested tolerance.
 - EPSG identities resolve to PROJJSON for GeoParquet metadata.
 - Closed cubic paths and `LineString` values remain linework unless a producer
   explicitly constructs a validated `Polygon` or `MultiPolygon`.
@@ -131,9 +139,10 @@ The crate uses Rust 2024 and forbids unsafe code.
 Last reviewed with **Sol 6.1 High** on **2026-10-04**, at commit
 `f9fd833f39c50303c68aea2b6b46782c14d0a6fa`.
 All ten repository validation checks and the Rust 1.92 compatibility check
-passed, including 40 integration tests. The review identified five unresolved
+passed, including 40 integration tests. The review identified five
 issues involving cubic flattening tolerance, GeoTIFF CRS identity, PROJJSON
 validation, coordinate provenance, and concurrent publication attestation.
+Their corrections are recorded in [0.1.1](CHANGELOG.md).
 
 ## License
 

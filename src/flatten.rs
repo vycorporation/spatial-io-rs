@@ -1,6 +1,9 @@
 //! Deterministic tolerance-bounded cubic flattening.
 
+use crate::numeric::ExactPoint;
 use crate::{CubicBezier, CubicPath, LineString, Point2, SpatialIoError};
+use num_rational::BigRational;
+use num_traits::ToPrimitive;
 
 const MAX_SUBDIVISION_DEPTH: u8 = 32;
 
@@ -50,17 +53,19 @@ pub struct DerivedLineString {
 ///
 /// # Errors
 ///
-/// Returns a subdivision-limit or geometry error when a certified result
-/// cannot be produced.
+/// Returns a subdivision-limit, endpoint-precision, or geometry error when
+/// a certified result cannot be produced.
 pub fn flatten_cubic(
     cubic: &CubicBezier,
     options: FlattenOptions,
 ) -> Result<DerivedLineString, SpatialIoError> {
     let mut points = vec![cubic.p0];
     let mut subdivision_count = 0;
+    let tolerance_squared = squared_tolerance(options);
     flatten_recursive(
-        cubic,
+        &exact_cubic(cubic),
         options.tolerance,
+        &tolerance_squared,
         0,
         &mut points,
         &mut subdivision_count,
@@ -69,7 +74,7 @@ pub fn flatten_cubic(
     Ok(DerivedLineString {
         line: LineString::new(points)?,
         source_primitive_ids: Vec::new(),
-        profile_id: "recursive_convex_hull_bound_v1",
+        profile_id: "recursive_convex_hull_bound_v2",
         tolerance: options.tolerance,
         subdivision_count,
     })
@@ -93,10 +98,12 @@ pub fn flatten_cubic_path(
     }
     let mut points = vec![path.segments()[0].p0];
     let mut subdivision_count = 0;
+    let tolerance_squared = squared_tolerance(options);
     for cubic in path.segments() {
         flatten_recursive(
-            cubic,
+            &exact_cubic(cubic),
             options.tolerance,
+            &tolerance_squared,
             0,
             &mut points,
             &mut subdivision_count,
@@ -108,7 +115,7 @@ pub fn flatten_cubic_path(
     Ok(DerivedLineString {
         line: LineString::new(points)?,
         source_primitive_ids,
-        profile_id: "recursive_convex_hull_bound_v1",
+        profile_id: "recursive_convex_hull_bound_v2",
         tolerance: options.tolerance,
         subdivision_count,
     })
@@ -121,15 +128,24 @@ fn preserve_collapsed_endpoint(points: &mut Vec<Point2>, endpoint: Point2) {
 }
 
 fn flatten_recursive(
-    cubic: &CubicBezier,
+    cubic: &[ExactPoint; 4],
     tolerance: f64,
+    tolerance_squared: &BigRational,
     depth: u8,
     points: &mut Vec<Point2>,
     subdivision_count: &mut u64,
 ) -> Result<(), SpatialIoError> {
-    if is_flat_enough(cubic, tolerance) {
-        if points.last().copied() != Some(cubic.p3) {
-            points.push(cubic.p3);
+    let start = rounded_endpoint(&cubic[0], tolerance, tolerance_squared)?;
+    let end = rounded_endpoint(&cubic[3], tolerance, tolerance_squared)?;
+    let rounded_start = ExactPoint::from(start);
+    let rounded_end = ExactPoint::from(end);
+    // Distance to a segment is convex: certifying all four exact control
+    // points against the rounded output chord certifies the entire subcurve.
+    if cubic.iter().all(|point| {
+        within_segment_distance(point, &rounded_start, &rounded_end, tolerance_squared)
+    }) {
+        if points.last().copied() != Some(end) {
+            points.push(end);
         }
         return Ok(());
     }
@@ -138,46 +154,97 @@ fn flatten_recursive(
             max_depth: MAX_SUBDIVISION_DEPTH,
         });
     }
-    let (left, right) = split_half(cubic)?;
+    let (left, right) = split_half(cubic);
     *subdivision_count += 1;
-    flatten_recursive(&left, tolerance, depth + 1, points, subdivision_count)?;
-    flatten_recursive(&right, tolerance, depth + 1, points, subdivision_count)
+    flatten_recursive(
+        &left,
+        tolerance,
+        tolerance_squared,
+        depth + 1,
+        points,
+        subdivision_count,
+    )?;
+    flatten_recursive(
+        &right,
+        tolerance,
+        tolerance_squared,
+        depth + 1,
+        points,
+        subdivision_count,
+    )
 }
 
-fn is_flat_enough(cubic: &CubicBezier, tolerance: f64) -> bool {
-    point_segment_distance(cubic.p1, cubic.p0, cubic.p3) <= tolerance
-        && point_segment_distance(cubic.p2, cubic.p0, cubic.p3) <= tolerance
+fn exact_cubic(cubic: &CubicBezier) -> [ExactPoint; 4] {
+    [cubic.p0, cubic.p1, cubic.p2, cubic.p3].map(ExactPoint::from)
 }
 
-fn point_segment_distance(point: Point2, start: Point2, end: Point2) -> f64 {
-    let dx = end.x() - start.x();
-    let dy = end.y() - start.y();
-    let length_squared = dx.mul_add(dx, dy * dy);
-    if length_squared == 0.0 {
-        return (point.x() - start.x()).hypot(point.y() - start.y());
+fn squared_tolerance(options: FlattenOptions) -> BigRational {
+    let tolerance = BigRational::from_float(options.tolerance).expect("validated finite tolerance");
+    &tolerance * &tolerance
+}
+
+fn squared_distance(first: &ExactPoint, second: &ExactPoint) -> BigRational {
+    let x = &first.x - &second.x;
+    let y = &first.y - &second.y;
+    &x * &x + &y * &y
+}
+
+fn rounded_endpoint(
+    point: &ExactPoint,
+    tolerance: f64,
+    tolerance_squared: &BigRational,
+) -> Result<Point2, SpatialIoError> {
+    let error = || SpatialIoError::ApproximationPrecision { tolerance };
+    let rounded = Point2::new(
+        point.x.to_f64().ok_or_else(error)?,
+        point.y.to_f64().ok_or_else(error)?,
+    )?;
+    if squared_distance(point, &rounded.into()) > *tolerance_squared {
+        return Err(error());
     }
-    let projection = (((point.x() - start.x()) * dx + (point.y() - start.y()) * dy)
-        / length_squared)
-        .clamp(0.0, 1.0);
-    let nearest_x = dx.mul_add(projection, start.x());
-    let nearest_y = dy.mul_add(projection, start.y());
-    (point.x() - nearest_x).hypot(point.y() - nearest_y)
+    Ok(rounded)
+}
+
+fn within_segment_distance(
+    point: &ExactPoint,
+    start: &ExactPoint,
+    end: &ExactPoint,
+    tolerance_squared: &BigRational,
+) -> bool {
+    let dx = &end.x - &start.x;
+    let dy = &end.y - &start.y;
+    let wx = &point.x - &start.x;
+    let wy = &point.y - &start.y;
+    let length_squared = &dx * &dx + &dy * &dy;
+    let projection = &wx * &dx + &wy * &dy;
+    if length_squared == BigRational::default() || projection <= BigRational::default() {
+        return squared_distance(point, start) <= *tolerance_squared;
+    }
+    if projection >= length_squared {
+        return squared_distance(point, end) <= *tolerance_squared;
+    }
+    let cross = &wx * &dy - &wy * &dx;
+    &cross * &cross <= tolerance_squared * length_squared
 }
 
 #[allow(clippy::similar_names)]
-fn split_half(cubic: &CubicBezier) -> Result<(CubicBezier, CubicBezier), SpatialIoError> {
-    let p01 = midpoint(cubic.p0, cubic.p1)?;
-    let p12 = midpoint(cubic.p1, cubic.p2)?;
-    let p23 = midpoint(cubic.p2, cubic.p3)?;
-    let p012 = midpoint(p01, p12)?;
-    let p123 = midpoint(p12, p23)?;
-    let p0123 = midpoint(p012, p123)?;
-    Ok((
-        CubicBezier::new(cubic.p0, p01, p012, p0123),
-        CubicBezier::new(p0123, p123, p23, cubic.p3),
-    ))
+fn split_half(cubic: &[ExactPoint; 4]) -> ([ExactPoint; 4], [ExactPoint; 4]) {
+    let p01 = midpoint(&cubic[0], &cubic[1]);
+    let p12 = midpoint(&cubic[1], &cubic[2]);
+    let p23 = midpoint(&cubic[2], &cubic[3]);
+    let p012 = midpoint(&p01, &p12);
+    let p123 = midpoint(&p12, &p23);
+    let p0123 = midpoint(&p012, &p123);
+    (
+        [cubic[0].clone(), p01, p012, p0123.clone()],
+        [p0123, p123, p23, cubic[3].clone()],
+    )
 }
 
-fn midpoint(left: Point2, right: Point2) -> Result<Point2, SpatialIoError> {
-    Point2::new((left.x() + right.x()) * 0.5, (left.y() + right.y()) * 0.5)
+fn midpoint(left: &ExactPoint, right: &ExactPoint) -> ExactPoint {
+    let two = BigRational::from_integer(2.into());
+    ExactPoint {
+        x: (&left.x + &right.x) / &two,
+        y: (&left.y + &right.y) / two,
+    }
 }
