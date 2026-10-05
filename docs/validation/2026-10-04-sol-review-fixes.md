@@ -23,6 +23,7 @@ cargo test --all-features
 RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features
 cargo tree --all-features
 git diff --check
+git diff --check f9fd833..HEAD
 CARGO_TARGET_DIR=/tmp/spatial-io-review-msrv cargo +1.92.0 check --locked --offline --all-features
 cargo package --list --allow-dirty --offline
 ```
