@@ -2,6 +2,11 @@
 
 ## 0.1.1 — 2026-10-04
 
+- Pin the offline schema validator to 0.47.0 and explicitly reject unbundled
+  references so `geoparquet` does not change consumers' global JSON float
+  parsing. Bundled schema validation and the 0.1.1 writer contract are retained
+  ([issue #21](https://github.com/vycorporation/spatial-io-rs/issues/21)).
+
 Fixes the five correctness findings from the Sol 6.1 High review of
 `f9fd833` ([issue #19](https://github.com/vycorporation/spatial-io-rs/issues/19)).
 
