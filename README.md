@@ -149,3 +149,29 @@ The fixes passed an independent review and all 51 integration tests; see the
 ## License
 
 Licensed under either Apache-2.0 or MIT, at your option.
+
+### Fixed intervals and bounded LineString output
+
+`sample_cubic(&cubic, UniformSampleOptions::new(60, 61)?)` evaluates
+`t = i / 60` and emits 61 vertices, including both exact source endpoints.
+It preserves closed and coincident-endpoint linework without joining or snapping.
+`uniform_bernstein_intervals_v1` is separate from adaptive certified flattening;
+it promises no deviation bound or bitwise Java-runtime parity. Normalize the
+producer coordinate frame explicitly before sampling. See
+`cargo run --no-default-features --example uniform_line` for a minimal consumer.
+
+With `geoparquet`, `write_line_strings_geoparquet` consumes an iterator of
+`Result<FeatureV1, SpatialIoError>`, retaining one conversion batch plus format
+buffers. It supports declared zero-row output, typed all-null attributes and
+late source/cancellation errors. It publishes only after complete sync and
+attestation, never replacing an existing destination. Every row remains an
+independent LineString.
+
+Caller row/vertex/attribute ceilings combine with internal admission limits:
+256 attribute fields, 64 KiB of field names, 1 MiB of encoded payload per row,
+64 MiB accounted conversion payload per batch, 16 profiles and 16,777,216 rows.
+Parquet groups contain at most 512 rows; dictionary/page checks use fixed
+per-row mini-batches so changing source chunk size preserves output bytes.
+These are processing/storage bounds, not a total-RSS promise: Arrow/WKB copies,
+Parquet buffers and retained footer metadata are additional. The caller must
+also bound construction and storage of input features.

@@ -14,6 +14,17 @@ pub enum SpatialIoError {
         /// Invalid value.
         value: f64,
     },
+    /// The caller cancelled conversion before publication.
+    #[error("spatial conversion cancelled")]
+    Cancelled,
+    /// A caller-specified processing ceiling was exceeded.
+    #[error("spatial resource limit exceeded: {resource} (limit {limit})")]
+    ResourceLimit {
+        /// Resource whose ceiling was exceeded.
+        resource: &'static str,
+        /// Configured maximum.
+        limit: usize,
+    },
     /// An approximation tolerance was not finite and positive.
     #[error("flatten tolerance must be finite and greater than zero, got {0}")]
     InvalidTolerance(f64),

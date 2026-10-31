@@ -1,4 +1,6 @@
 //! Optional `GeoParquet` 1.1 WKB writer.
+mod stream;
+pub use stream::{GeoParquetStreamOptions, GeoParquetStreamReport, write_line_strings_geoparquet};
 
 use std::collections::BTreeSet;
 use std::fs::File;
