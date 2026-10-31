@@ -11,6 +11,7 @@ mod flatten;
 mod model;
 mod numeric;
 mod reference;
+mod sample;
 mod topology;
 
 #[cfg(feature = "geoparquet")]
@@ -28,9 +29,13 @@ pub use reference::{
     Affine2D, AxisDirection, CoordinateSpace, Crs, PixelAnchor, PixelOrigin, RasterInterpretation,
     SpatialReference, transform_line_string,
 };
+pub use sample::{UNIFORM_INTERVALS_V1, UniformSampleOptions, sample_cubic};
 pub use topology::{LinearRing, MultiPolygon, Polygon, RingWinding};
 
 #[cfg(feature = "geoparquet")]
-pub use geoparquet::{GeoParquetWriteOptions, WriteReport, write_geoparquet};
+pub use geoparquet::{
+    GeoParquetStreamOptions, GeoParquetStreamReport, GeoParquetWriteOptions, WriteReport,
+    write_geoparquet, write_line_strings_geoparquet,
+};
 #[cfg(feature = "geotiff")]
 pub use geotiff::{GeoTiffReference, read_geotiff_reference};
